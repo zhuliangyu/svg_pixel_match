@@ -1,6 +1,5 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor
-import os
 from pathlib import Path
 from queue import Empty, Queue
 import shutil
@@ -107,9 +106,6 @@ def main(
             debug_output_path=debug_output_path,
         )
 
-    _open_outputs_directory(outputs_dir)
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--before-dir", type=Path, required=True)
@@ -149,15 +145,6 @@ def _clear_output_files(outputs_dir: Path) -> None:
             path.unlink()
         elif path.is_dir():
             shutil.rmtree(path)
-
-
-def _open_outputs_directory(outputs_dir: Path) -> None:
-    try:
-        os.startfile(outputs_dir)
-    except OSError:
-        pass
-
-
 def _print_different_filename(filename: str) -> None:
     print(f"DIFF {filename}", file=sys.stdout, flush=True)
 

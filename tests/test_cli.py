@@ -26,18 +26,18 @@ def test_main_deletes_all_files_in_outputs_before_running() -> None:
     assert list(outputs_dir.iterdir()) == []
 
 
-def test_main_opens_outputs_directory_when_finished(monkeypatch) -> None:
-    opened_path: Path | None = None
+def test_main_does_not_open_outputs_directory_when_finished(monkeypatch) -> None:
+    opened = False
 
-    def fake_open_outputs_directory(outputs_dir: Path) -> None:
-        nonlocal opened_path
-        opened_path = outputs_dir
+    def fake_startfile(path: Path) -> None:
+        nonlocal opened
+        opened = True
 
-    monkeypatch.setattr("svg_compare.cli._open_outputs_directory", fake_open_outputs_directory)
+    monkeypatch.setattr("os.startfile", fake_startfile, raising=False)
 
     main()
 
-    assert opened_path == Path("outputs")
+    assert opened is False
 
 
 def test_main_writes_results_into_custom_output_dir(monkeypatch) -> None:
@@ -420,8 +420,6 @@ def test_main_requests_worker_stop_when_interrupted(monkeypatch) -> None:
         "svg_compare.cli._wait_for_next_result",
         lambda result_queue, timeout_seconds=0.2: (_ for _ in ()).throw(KeyboardInterrupt()),
     )
-    monkeypatch.setattr("svg_compare.cli._open_outputs_directory", lambda outputs_dir: None)
-
     with pytest.raises(KeyboardInterrupt):
         main(
             before_dir=Path("tests/fixtures/before"),
