@@ -49,7 +49,7 @@ def main(
             worker_count = min(max(1, concurrency), total)
             _log_info(f"Starting {worker_count} worker threads")
             pair_queue: Queue[tuple[Path, Path] | None] = Queue()
-            result_queue: Queue[tuple[str, bool, bytes, bytes]] = Queue()
+            result_queue: Queue[tuple[Path, Path, bool, bytes, bytes]] = Queue()
             stop_event = threading.Event()
 
             for matched_pair in matched_pairs:
@@ -77,14 +77,19 @@ def main(
                         _raise_completed_worker_exception(futures)
                         continue
 
-                    filename, is_different, before_png, after_png = result
+                    matched_before_path, matched_after_path, is_different, before_png, after_png = result
+                    filename = matched_before_path.name
                     if is_different:
                         different_filenames.append(filename)
+                        diff_detail_dir = outputs_dir / "diff_details" / Path(filename).stem
+                        diff_detail_dir.mkdir(parents=True, exist_ok=True)
                         write_diff_details(
                             before_png,
                             after_png,
-                            outputs_dir / "diff_details" / Path(filename).stem,
+                            diff_detail_dir,
                         )
+                        shutil.copyfile(matched_before_path, diff_detail_dir / "before.svg")
+                        shutil.copyfile(matched_after_path, diff_detail_dir / "after.svg")
                         _print_different_filename(filename)
                     completed += 1
                     _print_progress(completed, total, started_at, len(different_filenames))
@@ -212,7 +217,7 @@ def _format_seconds(seconds: float) -> str:
 
 def _worker_loop(
     pair_queue: Queue[tuple[Path, Path] | None],
-    result_queue: Queue[tuple[str, bool, bytes, bytes]],
+    result_queue: Queue[tuple[Path, Path, bool, bytes, bytes]],
     remove_ids: list[str],
     stop_event: threading.Event,
 ) -> None:
@@ -237,7 +242,15 @@ def _worker_loop(
                 remove_ids,
                 renderer,
             )
-            result_queue.put((matched_before_path.name, is_different, before_png, after_png))
+            result_queue.put(
+                (
+                    matched_before_path,
+                    matched_after_path,
+                    is_different,
+                    before_png,
+                    after_png,
+                )
+            )
             _log_info(f"[{threading.current_thread().name}] Finished pair: {matched_before_path.name}")
             current_filename = None
     except Exception as exc:
@@ -293,9 +306,9 @@ def _close_thread_renderer() -> None:
 
 
 def _wait_for_next_result(
-    result_queue: Queue[tuple[str, bool, bytes, bytes]],
+    result_queue: Queue[tuple[Path, Path, bool, bytes, bytes]],
     timeout_seconds: float = 0.2,
-) -> tuple[str, bool, bytes, bytes] | None:
+) -> tuple[Path, Path, bool, bytes, bytes] | None:
     try:
         return result_queue.get(timeout=timeout_seconds)
     except Empty:

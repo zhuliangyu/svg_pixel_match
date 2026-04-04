@@ -220,6 +220,11 @@ def test_main_writes_different_filename_when_compare_returns_false(monkeypatch) 
     after_path = Path("tests/fixtures/after/sample_diff_1.svg")
     printed_diffs: list[str] = []
     diff_detail_calls: list[tuple[bytes, bytes, Path]] = []
+    diff_detail_dir = Path("outputs") / "diff_details" / "sample_diff_1"
+    if diff_detail_dir.exists():
+        for path in diff_detail_dir.iterdir():
+            path.unlink()
+        diff_detail_dir.rmdir()
 
     monkeypatch.setattr(
         "svg_compare.cli.find_matched_svg_pairs",
@@ -254,6 +259,8 @@ def test_main_writes_different_filename_when_compare_returns_false(monkeypatch) 
             Path("outputs") / "diff_details" / "sample_diff_1",
         )
     ]
+    assert (diff_detail_dir / "before.svg").read_text(encoding="utf-8") == before_path.read_text(encoding="utf-8")
+    assert (diff_detail_dir / "after.svg").read_text(encoding="utf-8") == after_path.read_text(encoding="utf-8")
     assert (Path("outputs") / "different.txt").read_text(encoding="utf-8") == "sample_diff_1.svg\n"
 
 
