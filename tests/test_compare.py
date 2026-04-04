@@ -38,7 +38,7 @@ def test_compare_png_bytes_returns_false_for_different_rendered_images() -> None
     assert compare_png_bytes(before_png, after_png) is False
 
 
-def test_write_diff_details_writes_side_by_side_and_red_diff_images() -> None:
+def test_write_diff_details_writes_before_after_side_by_side_and_red_diff_images() -> None:
     before_image = Image.new("RGBA", (2, 1))
     before_image.putdata(
         [
@@ -65,15 +65,23 @@ def test_write_diff_details_writes_side_by_side_and_red_diff_images() -> None:
 
     write_diff_details(before_png, after_png, output_dir)
 
+    before_path = output_dir / "before.png"
+    after_path = output_dir / "after.png"
     combined_path = output_dir / "before_after.png"
     diff_path = output_dir / "diff.png"
 
+    assert before_path.exists()
+    assert after_path.exists()
     assert combined_path.exists()
     assert diff_path.exists()
 
+    written_before = Image.open(before_path).convert("RGBA")
+    written_after = Image.open(after_path).convert("RGBA")
     written_combined = Image.open(combined_path).convert("RGBA")
     written_diff = Image.open(diff_path).convert("RGBA")
 
+    assert _read_pixels(written_before) == _read_pixels(before_image)
+    assert _read_pixels(written_after) == _read_pixels(after_image)
     assert written_combined.size == (4, 1)
     assert _read_pixels(written_combined) == [
         (0, 255, 0, 255),
@@ -106,9 +114,13 @@ def test_write_diff_details_handles_different_png_sizes() -> None:
 
     write_diff_details(before_png, after_png, output_dir)
 
+    written_before = Image.open(output_dir / "before.png").convert("RGBA")
+    written_after = Image.open(output_dir / "after.png").convert("RGBA")
     written_combined = Image.open(output_dir / "before_after.png").convert("RGBA")
     written_diff = Image.open(output_dir / "diff.png").convert("RGBA")
 
+    assert written_before.size == (2, 1)
+    assert written_after.size == (3, 1)
     assert written_combined.size == (5, 1)
     assert _read_pixels(written_combined) == [
         (0, 255, 0, 255),

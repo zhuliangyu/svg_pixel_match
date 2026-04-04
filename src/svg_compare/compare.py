@@ -19,6 +19,8 @@ def write_diff_details(left_png: bytes, right_png: bytes, output_dir: Path) -> N
     right_image = Image.open(BytesIO(right_png)).convert("RGBA")
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    left_image.save(output_dir / "before.png")
+    right_image.save(output_dir / "after.png")
     _build_side_by_side_image(left_image, right_image).save(output_dir / "before_after.png")
     _build_diff_image(left_image, right_image).save(output_dir / "diff.png")
 
