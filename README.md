@@ -50,6 +50,7 @@ $env:PYTHONPATH="src"
 python -m svg_compare.cli `
   --before-dir tests/fixtures/before `
   --after-dir tests/fixtures/after `
+  --concurrency 4 `
   --remove-id mycurrenttime
 ```
 
@@ -60,9 +61,12 @@ $env:PYTHONPATH="src"
 python -m svg_compare.cli `
   --before-dir tests/fixtures/before `
   --after-dir tests/fixtures/after `
+  --concurrency 4 `
   --remove-id mycurrenttime `
   --remove-id dot-before-a
 ```
+
+`--concurrency` 默认值是 `4`。
 
 运行后会先清空 `outputs/`，然后生成：
 
@@ -78,6 +82,7 @@ $env:PYTHONPATH="src"
 python -m svg_compare.cli `
   --before-dir tests/fixtures/before `
   --after-dir tests/fixtures/after `
+  --concurrency 4 `
   --remove-id mycurrenttime `
   --debug `
   --debug-svg-path tests/fixtures/before/sample_same_1.svg `

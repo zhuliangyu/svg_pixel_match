@@ -182,6 +182,55 @@ def test_main_writes_different_filename_when_compare_returns_false(monkeypatch) 
     assert (Path("outputs") / "different.txt").read_text(encoding="utf-8") == "sample_diff_1.svg\n"
 
 
+def test_main_processes_pairs_with_configured_concurrency(monkeypatch) -> None:
+    pairs = [
+        (Path("tests/fixtures/before/sample_same_1.svg"), Path("tests/fixtures/after/sample_same_1.svg")),
+        (Path("tests/fixtures/before/sample_diff_1.svg"), Path("tests/fixtures/after/sample_diff_1.svg")),
+    ]
+    submitted: list[tuple[Path, Path]] = []
+    requested_workers: int | None = None
+
+    class FakeFuture:
+        def __init__(self, result: bool) -> None:
+            self._result = result
+
+        def result(self) -> bool:
+            return self._result
+
+    class FakeExecutor:
+        def __init__(self, max_workers: int) -> None:
+            nonlocal requested_workers
+            requested_workers = max_workers
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def submit(self, fn, before_path: Path, after_path: Path, remove_ids: list[str]):
+            submitted.append((before_path, after_path))
+            result = before_path.name == "sample_diff_1.svg"
+            return FakeFuture(result)
+
+    monkeypatch.setattr(
+        "svg_compare.cli.find_matched_svg_pairs",
+        lambda before_dir, after_dir, report_path=None: pairs,
+    )
+    monkeypatch.setattr("svg_compare.cli.ThreadPoolExecutor", FakeExecutor)
+
+    main(
+        before_dir=Path("tests/fixtures/before"),
+        after_dir=Path("tests/fixtures/after"),
+        remove_ids=["mycurrenttime"],
+        concurrency=3,
+    )
+
+    assert requested_workers == 3
+    assert submitted == pairs
+    assert (Path("outputs") / "different.txt").read_text(encoding="utf-8") == "sample_diff_1.svg\n"
+
+
 def test_parse_args_accepts_before_after_paths_and_multiple_remove_ids() -> None:
     args = parse_args(
         [
@@ -189,6 +238,8 @@ def test_parse_args_accepts_before_after_paths_and_multiple_remove_ids() -> None
             "tests/fixtures/before",
             "--after-dir",
             "tests/fixtures/after",
+            "--concurrency",
+            "8",
             "--remove-id",
             "mycurrenttime",
             "--remove-id",
@@ -198,6 +249,7 @@ def test_parse_args_accepts_before_after_paths_and_multiple_remove_ids() -> None
 
     assert args.before_dir == Path("tests/fixtures/before")
     assert args.after_dir == Path("tests/fixtures/after")
+    assert args.concurrency == 8
     assert args.remove_ids == ["mycurrenttime", "dot-before-a"]
 
 
@@ -208,6 +260,7 @@ def test_run_cli_passes_parsed_values_to_main(monkeypatch) -> None:
         before_dir: Path | None = None,
         after_dir: Path | None = None,
         remove_ids: list[str] | None = None,
+        concurrency: int = 4,
         debug: bool = False,
         debug_svg_path: Path | None = None,
         debug_output_group: str = "before",
@@ -215,6 +268,7 @@ def test_run_cli_passes_parsed_values_to_main(monkeypatch) -> None:
         captured["before_dir"] = before_dir
         captured["after_dir"] = after_dir
         captured["remove_ids"] = remove_ids
+        captured["concurrency"] = concurrency
         captured["debug"] = debug
         captured["debug_svg_path"] = debug_svg_path
         captured["debug_output_group"] = debug_output_group
@@ -227,6 +281,8 @@ def test_run_cli_passes_parsed_values_to_main(monkeypatch) -> None:
             "tests/fixtures/before",
             "--after-dir",
             "tests/fixtures/after",
+            "--concurrency",
+            "6",
             "--remove-id",
             "mycurrenttime",
             "--remove-id",
@@ -242,6 +298,7 @@ def test_run_cli_passes_parsed_values_to_main(monkeypatch) -> None:
     assert captured["before_dir"] == Path("tests/fixtures/before")
     assert captured["after_dir"] == Path("tests/fixtures/after")
     assert captured["remove_ids"] == ["mycurrenttime", "dot-before-a"]
+    assert captured["concurrency"] == 6
     assert captured["debug"] is True
     assert captured["debug_svg_path"] == Path("tests/fixtures/before/sample_same_1.svg")
     assert captured["debug_output_group"] == "after"
