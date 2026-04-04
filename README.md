@@ -19,6 +19,22 @@
 - Python 3.13
 - Windows PowerShell
 
+## 从 GitHub 获取代码
+
+如果你已经下载过这个项目，先更新到最新代码：
+
+```powershell
+Set-Location "D:\Code\svg_pixel_match"
+git pull
+```
+
+如果你是第一次下载项目：
+
+```powershell
+git clone https://github.com/zhuliangyu/svg_pixel_match.git
+Set-Location "svg_pixel_match"
+```
+
 ## 安装依赖
 
 先安装 Python 依赖：
