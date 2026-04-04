@@ -8,7 +8,7 @@ import sys
 import threading
 import time
 
-from svg_compare.compare import compare_png_bytes
+from svg_compare.compare import compare_png_bytes, write_diff_details
 from svg_compare.pairing import find_matched_svg_pairs
 from svg_compare.preprocess import preprocess_svg
 from svg_compare.render import PlaywrightSvgRenderer, render_svg_to_png
@@ -63,9 +63,14 @@ def main(
 
                 completed = 0
                 while completed < total:
-                    filename, is_different = result_queue.get()
+                    filename, is_different, before_png, after_png = result_queue.get()
                     if is_different:
                         different_filenames.append(filename)
+                        write_diff_details(
+                            before_png,
+                            after_png,
+                            outputs_dir / "diff_details" / Path(filename).stem,
+                        )
                         _print_different_filename(filename)
                     completed += 1
                     _print_progress(completed, total, started_at, len(different_filenames))
@@ -192,7 +197,7 @@ def _format_seconds(seconds: float) -> str:
 
 def _worker_loop(
     pair_queue: Queue[tuple[Path, Path] | None],
-    result_queue: Queue[tuple[str, bool]],
+    result_queue: Queue[tuple[str, bool, bytes, bytes]],
     remove_ids: list[str],
 ) -> None:
     renderer = _get_thread_renderer()
@@ -203,13 +208,13 @@ def _worker_loop(
                 return
 
             matched_before_path, matched_after_path = matched_pair
-            is_different = _process_pair(
+            is_different, before_png, after_png = _process_pair(
                 matched_before_path,
                 matched_after_path,
                 remove_ids,
                 renderer,
             )
-            result_queue.put((matched_before_path.name, is_different))
+            result_queue.put((matched_before_path.name, is_different, before_png, after_png))
     finally:
         _close_thread_renderer()
 
@@ -219,7 +224,7 @@ def _process_pair(
     matched_after_path: Path,
     remove_ids: list[str],
     renderer: PlaywrightSvgRenderer | None = None,
-) -> bool:
+) -> tuple[bool, bytes, bytes]:
     if renderer is None:
         renderer = _get_thread_renderer()
     matched_before_svg = matched_before_path.read_text(encoding="utf-8")
@@ -228,7 +233,7 @@ def _process_pair(
     processed_after_svg = preprocess_svg(matched_after_svg, remove_ids)
     before_png = renderer.render_svg_to_png(processed_before_svg)
     after_png = renderer.render_svg_to_png(processed_after_svg)
-    return not compare_png_bytes(before_png, after_png)
+    return not compare_png_bytes(before_png, after_png), before_png, after_png
 
 
 def _get_thread_renderer() -> PlaywrightSvgRenderer:

@@ -166,6 +166,7 @@ def test_main_writes_different_filename_when_compare_returns_false(monkeypatch) 
     before_path = Path("tests/fixtures/before/sample_diff_1.svg")
     after_path = Path("tests/fixtures/after/sample_diff_1.svg")
     printed_diffs: list[str] = []
+    diff_detail_calls: list[tuple[bytes, bytes, Path]] = []
 
     monkeypatch.setattr(
         "svg_compare.cli.find_matched_svg_pairs",
@@ -178,6 +179,12 @@ def test_main_writes_different_filename_when_compare_returns_false(monkeypatch) 
     monkeypatch.setattr("svg_compare.cli.preprocess_svg", lambda svg_text, remove_ids: svg_text)
     monkeypatch.setattr("svg_compare.cli._get_thread_renderer", lambda: FakeRenderer())
     monkeypatch.setattr("svg_compare.cli.compare_png_bytes", lambda before_png, after_png: False)
+    monkeypatch.setattr(
+        "svg_compare.cli.write_diff_details",
+        lambda before_png, after_png, output_dir: diff_detail_calls.append(
+            (before_png, after_png, output_dir)
+        ),
+    )
     monkeypatch.setattr("svg_compare.cli._print_different_filename", lambda filename: printed_diffs.append(filename))
 
     main(
@@ -187,6 +194,13 @@ def test_main_writes_different_filename_when_compare_returns_false(monkeypatch) 
     )
 
     assert printed_diffs == ["sample_diff_1.svg"]
+    assert diff_detail_calls == [
+        (
+            b"png",
+            b"png",
+            Path("outputs") / "diff_details" / "sample_diff_1",
+        )
+    ]
     assert (Path("outputs") / "different.txt").read_text(encoding="utf-8") == "sample_diff_1.svg\n"
 
 
@@ -237,6 +251,7 @@ def test_main_processes_pairs_with_configured_concurrency(monkeypatch) -> None:
         "svg_compare.cli.compare_png_bytes",
         lambda before_png, after_png: next(compare_results),
     )
+    monkeypatch.setattr("svg_compare.cli.write_diff_details", lambda before_png, after_png, output_dir: None)
 
     main(
         before_dir=Path("tests/fixtures/before"),
@@ -293,6 +308,7 @@ def test_main_updates_progress_for_completed_pairs(monkeypatch) -> None:
     monkeypatch.setattr("svg_compare.cli._close_thread_renderer", lambda: None)
     monkeypatch.setattr("svg_compare.cli.preprocess_svg", lambda svg_text, remove_ids: svg_text)
     monkeypatch.setattr("svg_compare.cli.compare_png_bytes", lambda before_png, after_png: True)
+    monkeypatch.setattr("svg_compare.cli.write_diff_details", lambda before_png, after_png, output_dir: None)
     monkeypatch.setattr(
         "svg_compare.cli._print_progress",
         lambda completed, total, started_at, different_count: progress_updates.append(
