@@ -40,6 +40,56 @@ def test_main_opens_outputs_directory_when_finished(monkeypatch) -> None:
     assert opened_path == Path("outputs")
 
 
+def test_main_writes_results_into_custom_output_dir(monkeypatch) -> None:
+    custom_output_dir = Path("outputs_custom")
+    default_different_path = Path("outputs") / "different.txt"
+    if default_different_path.exists():
+        default_different_path.unlink()
+    if custom_output_dir.exists():
+        for path in custom_output_dir.rglob("*"):
+            if path.is_file():
+                path.unlink()
+        for path in sorted(custom_output_dir.rglob("*"), reverse=True):
+            if path.is_dir():
+                path.rmdir()
+        custom_output_dir.rmdir()
+    before_path = Path("tests/fixtures/before/sample_diff_1.svg")
+    after_path = Path("tests/fixtures/after/sample_diff_1.svg")
+
+    monkeypatch.setattr(
+        "svg_compare.cli.find_matched_svg_pairs",
+        lambda before_dir, after_dir, report_path=None: [(before_path, after_path)],
+    )
+
+    class FakeRenderer:
+        def render_svg_to_png(self, svg_text: str) -> bytes:
+            return b"png"
+
+    monkeypatch.setattr("svg_compare.cli.preprocess_svg", lambda svg_text, remove_ids: svg_text)
+    monkeypatch.setattr("svg_compare.cli._get_thread_renderer", lambda: FakeRenderer())
+    monkeypatch.setattr("svg_compare.cli._close_thread_renderer", lambda: None)
+    monkeypatch.setattr("svg_compare.cli.compare_png_bytes", lambda before_png, after_png: False)
+    monkeypatch.setattr("svg_compare.cli.write_diff_details", lambda before_png, after_png, output_dir: None)
+
+    main(
+        before_dir=Path("tests/fixtures/before"),
+        after_dir=Path("tests/fixtures/after"),
+        remove_ids=["mycurrenttime"],
+        output_dir=custom_output_dir,
+    )
+
+    assert (custom_output_dir / "different.txt").read_text(encoding="utf-8") == "sample_diff_1.svg\n"
+    assert not default_different_path.exists()
+
+    for path in custom_output_dir.rglob("*"):
+        if path.is_file():
+            path.unlink()
+    for path in sorted(custom_output_dir.rglob("*"), reverse=True):
+        if path.is_dir():
+            path.rmdir()
+    custom_output_dir.rmdir()
+
+
 def test_main_passes_debug_render_output_to_before_directory(monkeypatch) -> None:
     debug_svg_path = Path("tests") / "fixtures" / "before" / "sample_same_1.svg"
     captured: dict[str, object] = {}
@@ -227,11 +277,14 @@ def test_main_processes_pairs_with_configured_concurrency(monkeypatch) -> None:
         def __exit__(self, exc_type, exc, tb) -> None:
             return None
 
-        def submit(self, fn, pair_queue, result_queue, remove_ids: list[str]):
+        def submit(self, fn, pair_queue, result_queue, remove_ids: list[str], stop_event):
             nonlocal submitted_worker_count
             submitted_worker_count += 1
-            fn(pair_queue, result_queue, remove_ids)
+            fn(pair_queue, result_queue, remove_ids, stop_event)
             return FakeFuture()
+
+        def shutdown(self, wait: bool = True, cancel_futures: bool = False) -> None:
+            return None
 
     monkeypatch.setattr(
         "svg_compare.cli.find_matched_svg_pairs",
@@ -289,11 +342,14 @@ def test_main_updates_progress_for_completed_pairs(monkeypatch) -> None:
         def __exit__(self, exc_type, exc, tb) -> None:
             return None
 
-        def submit(self, fn, pair_queue, result_queue, remove_ids: list[str]):
-            fn(pair_queue, result_queue, remove_ids)
+        def submit(self, fn, pair_queue, result_queue, remove_ids: list[str], stop_event):
+            fn(pair_queue, result_queue, remove_ids, stop_event)
             future = FakeFuture(False)
             self._futures.append(future)
             return future
+
+        def shutdown(self, wait: bool = True, cancel_futures: bool = False) -> None:
+            return None
 
     monkeypatch.setattr(
         "svg_compare.cli.find_matched_svg_pairs",
@@ -323,6 +379,59 @@ def test_main_updates_progress_for_completed_pairs(monkeypatch) -> None:
     )
 
     assert progress_updates == [(1, 2, 0), (2, 2, 0)]
+
+
+def test_main_requests_worker_stop_when_interrupted(monkeypatch) -> None:
+    pairs = [
+        (Path("tests/fixtures/before/sample_same_1.svg"), Path("tests/fixtures/after/sample_same_1.svg")),
+    ]
+    shutdown_calls: list[tuple[bool, bool]] = []
+    queue_instances: list[FakeQueue] = []
+
+    class FakeQueue:
+        def __init__(self) -> None:
+            self.put_calls: list[object] = []
+            queue_instances.append(self)
+
+        def put(self, item: object) -> None:
+            self.put_calls.append(item)
+
+    class FakeFuture:
+        def result(self) -> None:
+            return None
+
+    class FakeExecutor:
+        def __init__(self, max_workers: int) -> None:
+            return None
+
+        def submit(self, fn, pair_queue, result_queue, remove_ids: list[str], stop_event):
+            return FakeFuture()
+
+        def shutdown(self, wait: bool = True, cancel_futures: bool = False) -> None:
+            shutdown_calls.append((wait, cancel_futures))
+
+    monkeypatch.setattr(
+        "svg_compare.cli.find_matched_svg_pairs",
+        lambda before_dir, after_dir, report_path=None: pairs,
+    )
+    monkeypatch.setattr("svg_compare.cli.Queue", FakeQueue)
+    monkeypatch.setattr("svg_compare.cli.ThreadPoolExecutor", FakeExecutor)
+    monkeypatch.setattr(
+        "svg_compare.cli._wait_for_next_result",
+        lambda result_queue, timeout_seconds=0.2: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+    monkeypatch.setattr("svg_compare.cli._open_outputs_directory", lambda outputs_dir: None)
+
+    with pytest.raises(KeyboardInterrupt):
+        main(
+            before_dir=Path("tests/fixtures/before"),
+            after_dir=Path("tests/fixtures/after"),
+            remove_ids=["mycurrenttime"],
+        )
+
+    pair_queue = queue_instances[0]
+    assert shutdown_calls == [(False, True)]
+    assert pair_queue.put_calls.count(None) == 2
 
 
 def test_get_thread_renderer_reuses_renderer_in_same_thread(monkeypatch) -> None:
@@ -373,6 +482,8 @@ def test_parse_args_accepts_before_after_paths_and_multiple_remove_ids() -> None
             "tests/fixtures/before",
             "--after-dir",
             "tests/fixtures/after",
+            "--output-dir",
+            "custom_outputs",
             "--concurrency",
             "8",
             "--remove-id",
@@ -384,6 +495,7 @@ def test_parse_args_accepts_before_after_paths_and_multiple_remove_ids() -> None
 
     assert args.before_dir == Path("tests/fixtures/before")
     assert args.after_dir == Path("tests/fixtures/after")
+    assert args.output_dir == Path("custom_outputs")
     assert args.concurrency == 8
     assert args.remove_ids == ["mycurrenttime", "dot-before-a"]
 
@@ -394,6 +506,7 @@ def test_run_cli_passes_parsed_values_to_main(monkeypatch) -> None:
     def fake_main(
         before_dir: Path | None = None,
         after_dir: Path | None = None,
+        output_dir: Path | None = None,
         remove_ids: list[str] | None = None,
         concurrency: int = 4,
         debug: bool = False,
@@ -402,6 +515,7 @@ def test_run_cli_passes_parsed_values_to_main(monkeypatch) -> None:
     ) -> None:
         captured["before_dir"] = before_dir
         captured["after_dir"] = after_dir
+        captured["output_dir"] = output_dir
         captured["remove_ids"] = remove_ids
         captured["concurrency"] = concurrency
         captured["debug"] = debug
@@ -416,6 +530,8 @@ def test_run_cli_passes_parsed_values_to_main(monkeypatch) -> None:
             "tests/fixtures/before",
             "--after-dir",
             "tests/fixtures/after",
+            "--output-dir",
+            "custom_outputs",
             "--concurrency",
             "6",
             "--remove-id",
@@ -432,6 +548,7 @@ def test_run_cli_passes_parsed_values_to_main(monkeypatch) -> None:
 
     assert captured["before_dir"] == Path("tests/fixtures/before")
     assert captured["after_dir"] == Path("tests/fixtures/after")
+    assert captured["output_dir"] == Path("custom_outputs")
     assert captured["remove_ids"] == ["mycurrenttime", "dot-before-a"]
     assert captured["concurrency"] == 6
     assert captured["debug"] is True

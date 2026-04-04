@@ -52,6 +52,7 @@ $env:PYTHONPATH="src"
 python -m svg_compare.cli `
   --before-dir tests/fixtures/before `
   --after-dir tests/fixtures/after `
+  --output-dir outputs `
   --concurrency 4 `
   --remove-id mycurrenttime
 ```
@@ -63,6 +64,7 @@ $env:PYTHONPATH="D:\Code\svg_pixel_match\src"
 python -m svg_compare.cli `
   --before-dir "D:\Code\svg_pixel_match\tests\fixtures\before" `
   --after-dir "D:\Code\svg_pixel_match\tests\fixtures\after" `
+  --output-dir "D:\Code\svg_pixel_match\outputs" `
   --concurrency 4 `
   --remove-id mycurrenttime
 ```
@@ -75,12 +77,13 @@ $env:PYTHONPATH="src"
 python -m svg_compare.cli `
   --before-dir tests/fixtures/before `
   --after-dir tests/fixtures/after `
+  --output-dir outputs `
   --concurrency 4 `
   --remove-id mycurrenttime `
   --remove-id dot-before-a
 ```
 
-`--concurrency` 默认值是 `4`。
+`--output-dir` 默认值是 `outputs`，`--concurrency` 默认值是 `4`。
 
 运行后会先清空 `outputs/`，然后生成：
 
@@ -98,6 +101,7 @@ $env:PYTHONPATH="src"
 python -m svg_compare.cli `
   --before-dir tests/fixtures/before `
   --after-dir tests/fixtures/after `
+  --output-dir outputs `
   --concurrency 4 `
   --remove-id mycurrenttime `
   --debug `
@@ -170,6 +174,7 @@ $env:PYTHONPATH="src"
 python -m svg_compare.cli `
   --before-dir tests/benchmarks/large_500_pairs/before `
   --after-dir tests/benchmarks/large_500_pairs/after `
+  --output-dir outputs `
   --concurrency 4
 ```
 

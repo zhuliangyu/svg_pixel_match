@@ -2,7 +2,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
-from queue import Queue
+from queue import Empty, Queue
 import shutil
 import sys
 import threading
@@ -20,13 +20,14 @@ _THREAD_RENDERER = threading.local()
 def main(
     before_dir: Path | None = None,
     after_dir: Path | None = None,
+    output_dir: Path | None = None,
     remove_ids: list[str] | None = None,
     concurrency: int = 4,
     debug: bool = False,
     debug_svg_path: Path | None = None,
     debug_output_group: str = "before",
 ) -> None:
-    outputs_dir = Path("outputs")
+    outputs_dir = output_dir or Path("outputs")
     _clear_output_files(outputs_dir)
     different_filenames: list[str] = []
 
@@ -43,27 +44,34 @@ def main(
         if total > 0:
             worker_count = min(max(1, concurrency), total)
             pair_queue: Queue[tuple[Path, Path] | None] = Queue()
-            result_queue: Queue[tuple[str, bool]] = Queue()
+            result_queue: Queue[tuple[str, bool, bytes, bytes]] = Queue()
+            stop_event = threading.Event()
 
             for matched_pair in matched_pairs:
                 pair_queue.put(matched_pair)
             for _ in range(worker_count):
                 pair_queue.put(None)
 
-            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            executor = ThreadPoolExecutor(max_workers=worker_count)
+            try:
                 futures = [
                     executor.submit(
                         _worker_loop,
                         pair_queue,
                         result_queue,
                         remove_ids or [],
+                        stop_event,
                     )
                     for _ in range(worker_count)
                 ]
 
                 completed = 0
                 while completed < total:
-                    filename, is_different, before_png, after_png = result_queue.get()
+                    result = _wait_for_next_result(result_queue)
+                    if result is None:
+                        continue
+
+                    filename, is_different, before_png, after_png = result
                     if is_different:
                         different_filenames.append(filename)
                         write_diff_details(
@@ -77,6 +85,13 @@ def main(
 
                 for future in futures:
                     future.result()
+            except KeyboardInterrupt:
+                _request_worker_stop(pair_queue, worker_count, stop_event)
+                executor.shutdown(wait=False, cancel_futures=True)
+                raise
+            finally:
+                if not stop_event.is_set():
+                    executor.shutdown(wait=True, cancel_futures=False)
 
         (outputs_dir / "different.txt").write_text(
             "".join(f"{filename}\n" for filename in sorted(different_filenames)),
@@ -99,6 +114,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--before-dir", type=Path, required=True)
     parser.add_argument("--after-dir", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path, default=Path("outputs"))
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--remove-id", dest="remove_ids", action="append", default=[])
     parser.add_argument("--debug", action="store_true")
@@ -116,6 +132,7 @@ def run_cli(argv: list[str] | None = None) -> None:
     main(
         before_dir=args.before_dir,
         after_dir=args.after_dir,
+        output_dir=args.output_dir,
         remove_ids=args.remove_ids,
         concurrency=args.concurrency,
         debug=args.debug,
@@ -199,10 +216,13 @@ def _worker_loop(
     pair_queue: Queue[tuple[Path, Path] | None],
     result_queue: Queue[tuple[str, bool, bytes, bytes]],
     remove_ids: list[str],
+    stop_event: threading.Event,
 ) -> None:
     renderer = _get_thread_renderer()
     try:
         while True:
+            if stop_event.is_set():
+                return
             matched_pair = pair_queue.get()
             if matched_pair is None:
                 return
@@ -254,6 +274,26 @@ def _close_thread_renderer() -> None:
         renderer.close()
     finally:
         _THREAD_RENDERER.renderer = None
+
+
+def _wait_for_next_result(
+    result_queue: Queue[tuple[str, bool, bytes, bytes]],
+    timeout_seconds: float = 0.2,
+) -> tuple[str, bool, bytes, bytes] | None:
+    try:
+        return result_queue.get(timeout=timeout_seconds)
+    except Empty:
+        return None
+
+
+def _request_worker_stop(
+    pair_queue: Queue[tuple[Path, Path] | None],
+    worker_count: int,
+    stop_event: threading.Event,
+) -> None:
+    stop_event.set()
+    for _ in range(worker_count):
+        pair_queue.put(None)
 
 
 if __name__ == "__main__":
