@@ -26,6 +26,20 @@ def test_main_deletes_all_files_in_outputs_before_running() -> None:
     assert list(outputs_dir.iterdir()) == []
 
 
+def test_main_opens_outputs_directory_when_finished(monkeypatch) -> None:
+    opened_path: Path | None = None
+
+    def fake_open_outputs_directory(outputs_dir: Path) -> None:
+        nonlocal opened_path
+        opened_path = outputs_dir
+
+    monkeypatch.setattr("svg_compare.cli._open_outputs_directory", fake_open_outputs_directory)
+
+    main()
+
+    assert opened_path == Path("outputs")
+
+
 def test_main_passes_debug_render_output_to_before_directory(monkeypatch) -> None:
     debug_svg_path = Path("tests") / "fixtures" / "before" / "sample_same_1.svg"
     captured: dict[str, object] = {}

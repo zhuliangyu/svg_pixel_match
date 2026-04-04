@@ -1,4 +1,5 @@
 import argparse
+import os
 from pathlib import Path
 import shutil
 
@@ -52,6 +53,7 @@ def main(
             debug_output_path=debug_output_path,
         )
 
+    _open_outputs_directory(outputs_dir)
     print("Start svg pixel matching")
 
 
@@ -90,6 +92,13 @@ def _clear_output_files(outputs_dir: Path) -> None:
             path.unlink()
         elif path.is_dir():
             shutil.rmtree(path)
+
+
+def _open_outputs_directory(outputs_dir: Path) -> None:
+    try:
+        os.startfile(outputs_dir)
+    except OSError:
+        pass
 
 
 if __name__ == "__main__":
