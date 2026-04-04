@@ -700,7 +700,7 @@ def test_main_end_to_end_writes_expected_different_txt() -> None:
         "sample_diff_2.svg\n"
     )
     assert (Path("outputs") / "unmatched_svgs.txt").read_text(encoding="utf-8") == (
-        "after_only_unmatched.svg\n"
+        "after/after_only_unmatched.svg\n"
     )
 
 
@@ -719,5 +719,5 @@ def test_main_end_to_end_without_removing_mycurrenttime_writes_expected_differen
         "sample_same_2.svg\n"
     )
     assert (Path("outputs") / "unmatched_svgs.txt").read_text(encoding="utf-8") == (
-        "after_only_unmatched.svg\n"
+        "after/after_only_unmatched.svg\n"
     )

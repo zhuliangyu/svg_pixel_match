@@ -36,4 +36,4 @@ def test_find_matched_svg_pairs_writes_unmatched_svg_names_to_reports_file() -> 
     find_matched_svg_pairs(BEFORE_DIR, AFTER_DIR, report_path=report_path)
 
     assert report_path.exists()
-    assert report_path.read_text(encoding="utf-8") == "after_only_unmatched.svg\n"
+    assert report_path.read_text(encoding="utf-8") == "after/after_only_unmatched.svg\n"
