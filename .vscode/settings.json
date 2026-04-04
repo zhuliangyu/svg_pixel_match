@@ -11,4 +11,23 @@
   "[python]": {
     "editor.defaultFormatter": "ms-python.black-formatter"
   },
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "**/.pytest_cache": true,
+    "**/.venv": true,
+    "**/venv": true,
+    "**/env": true,
+    "**/.env": true,
+    "**/node_modules": true,
+    "**/.git": true,
+    "**/.vscode": true,
+    "**/outputs": true,
+    "**/reports": true,
+    "**/stale": true,
+    "**/.cache": true,
+    "**/.mypy_cache": true,
+    "**/.ruff_cache": true,
+    "**/.coverage": true
+  }
 }

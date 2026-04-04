@@ -113,8 +113,10 @@ def test_main_pairs_svg_files_and_preprocesses_before_and_after(monkeypatch) -> 
     assert len(preprocess_calls) == 2
     assert preprocess_calls[0][1] == ["mycurrenttime", "dot-before-a"]
     assert preprocess_calls[1][1] == ["mycurrenttime", "dot-before-a"]
-    assert "2026-04-03T23:45:10.101" in preprocess_calls[0][0]
-    assert "2026-04-03T23:45:10.202" in preprocess_calls[1][0]
+    assert 'id="bg-before-a"' in preprocess_calls[0][0]
+    assert 'id="mycurrenttime"' in preprocess_calls[0][0]
+    assert 'id="bg-after-a"' in preprocess_calls[1][0]
+    assert 'id="mycurrenttime"' in preprocess_calls[1][0]
 
 
 def test_main_renders_preprocessed_svgs_and_compares_pngs(monkeypatch) -> None:
@@ -256,6 +258,25 @@ def test_main_end_to_end_writes_expected_different_txt() -> None:
     assert (Path("outputs") / "different.txt").read_text(encoding="utf-8") == (
         "sample_diff_1.svg\n"
         "sample_diff_2.svg\n"
+    )
+    assert (Path("outputs") / "unmatched_svgs.txt").read_text(encoding="utf-8") == (
+        "after_only_unmatched.svg\n"
+    )
+
+
+@pytest.mark.integration
+def test_main_end_to_end_without_removing_mycurrenttime_writes_expected_different_txt() -> None:
+    main(
+        before_dir=Path("tests/fixtures/before"),
+        after_dir=Path("tests/fixtures/after"),
+        remove_ids=[],
+    )
+
+    assert (Path("outputs") / "different.txt").read_text(encoding="utf-8") == (
+        "sample_diff_1.svg\n"
+        "sample_diff_2.svg\n"
+        "sample_same_1.svg\n"
+        "sample_same_2.svg\n"
     )
     assert (Path("outputs") / "unmatched_svgs.txt").read_text(encoding="utf-8") == (
         "after_only_unmatched.svg\n"

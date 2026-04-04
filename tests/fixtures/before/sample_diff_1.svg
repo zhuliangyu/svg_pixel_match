@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
   <rect id="bg-before-c" x="8" y="8" width="104" height="104" fill="#ffffff" stroke="#444444" stroke-width="4" />
   <circle id="dot-before-c" cx="42" cy="60" r="18" fill="#2ca02c" />
-  <text id="mycurrenttime" x="12" y="24" font-size="12" font-weight="700" fill="#ff00aa" stroke="#000000" stroke-width="0.6">2026-04-03T23:45:10.505</text>
+  <text id="mycurrenttime" x="12" y="24" font-size="12" font-weight="700" fill="#ff00aa" stroke="#000000" stroke-width="0.6">a5</text>
 </svg>
