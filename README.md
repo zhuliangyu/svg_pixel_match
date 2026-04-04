@@ -43,9 +43,10 @@ python -m playwright install chromium
 
 这个项目当前使用 `src/` 布局，直接运行 CLI 时需要把 `src` 加到 `PYTHONPATH`。
 
-示例：
+推荐先进入项目目录再运行：
 
 ```powershell
+Set-Location "D:\Code\svg_pixel_match"
 $env:PYTHONPATH="src"
 python -m svg_compare.cli `
   --before-dir tests/fixtures/before `
@@ -54,9 +55,21 @@ python -m svg_compare.cli `
   --remove-id mycurrenttime
 ```
 
+如果你不在项目目录下运行，就要把 `PYTHONPATH` 设成绝对路径：
+
+```powershell
+$env:PYTHONPATH="D:\Code\svg_pixel_match\src"
+python -m svg_compare.cli `
+  --before-dir "D:\Code\svg_pixel_match\tests\fixtures\before" `
+  --after-dir "D:\Code\svg_pixel_match\tests\fixtures\after" `
+  --concurrency 4 `
+  --remove-id mycurrenttime
+```
+
 如果需要删除多个 `id`，重复传入 `--remove-id`：
 
 ```powershell
+Set-Location "D:\Code\svg_pixel_match"
 $env:PYTHONPATH="src"
 python -m svg_compare.cli `
   --before-dir tests/fixtures/before `
@@ -78,6 +91,7 @@ python -m svg_compare.cli `
 如果你想单独把某个 SVG 渲染成 PNG 方便查看，可以打开 debug：
 
 ```powershell
+Set-Location "D:\Code\svg_pixel_match"
 $env:PYTHONPATH="src"
 python -m svg_compare.cli `
   --before-dir tests/fixtures/before `
@@ -129,6 +143,7 @@ python -m pytest tests/test_cli.py -k expected_different_txt
 生成 `500` 对、单文件约 `1.5MB` 的测试数据：
 
 ```powershell
+Set-Location "D:\Code\svg_pixel_match"
 python tests/benchmarks/generate_large_svg_pairs.py `
   --output-root tests/benchmarks/large_500_pairs `
   --pairs 500 `
@@ -148,6 +163,7 @@ python tests/benchmarks/generate_large_svg_pairs.py `
 运行 benchmark：
 
 ```powershell
+Set-Location "D:\Code\svg_pixel_match"
 $env:PYTHONPATH="src"
 python -m svg_compare.cli `
   --before-dir tests/benchmarks/large_500_pairs/before `

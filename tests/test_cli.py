@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from svg_compare.cli import main, parse_args, run_cli
+from svg_compare.cli import _format_progress_line, main, parse_args, run_cli
 
 
 def test_main_prints_start_message(capsys) -> None:
@@ -164,6 +164,7 @@ def test_main_renders_preprocessed_svgs_and_compares_pngs(monkeypatch) -> None:
 def test_main_writes_different_filename_when_compare_returns_false(monkeypatch) -> None:
     before_path = Path("tests/fixtures/before/sample_diff_1.svg")
     after_path = Path("tests/fixtures/after/sample_diff_1.svg")
+    printed_diffs: list[str] = []
 
     monkeypatch.setattr(
         "svg_compare.cli.find_matched_svg_pairs",
@@ -172,6 +173,7 @@ def test_main_writes_different_filename_when_compare_returns_false(monkeypatch) 
     monkeypatch.setattr("svg_compare.cli.preprocess_svg", lambda svg_text, remove_ids: svg_text)
     monkeypatch.setattr("svg_compare.cli.render_svg_to_png", lambda svg_text, debug=False, debug_output_path=None: b"png")
     monkeypatch.setattr("svg_compare.cli.compare_png_bytes", lambda before_png, after_png: False)
+    monkeypatch.setattr("svg_compare.cli._print_different_filename", lambda filename: printed_diffs.append(filename))
 
     main(
         before_dir=Path("tests/fixtures/before"),
@@ -179,6 +181,7 @@ def test_main_writes_different_filename_when_compare_returns_false(monkeypatch) 
         remove_ids=["mycurrenttime"],
     )
 
+    assert printed_diffs == ["sample_diff_1.svg"]
     assert (Path("outputs") / "different.txt").read_text(encoding="utf-8") == "sample_diff_1.svg\n"
 
 
@@ -218,6 +221,7 @@ def test_main_processes_pairs_with_configured_concurrency(monkeypatch) -> None:
         lambda before_dir, after_dir, report_path=None: pairs,
     )
     monkeypatch.setattr("svg_compare.cli.ThreadPoolExecutor", FakeExecutor)
+    monkeypatch.setattr("svg_compare.cli.as_completed", lambda futures: list(futures))
 
     main(
         before_dir=Path("tests/fixtures/before"),
@@ -229,6 +233,57 @@ def test_main_processes_pairs_with_configured_concurrency(monkeypatch) -> None:
     assert requested_workers == 3
     assert submitted == pairs
     assert (Path("outputs") / "different.txt").read_text(encoding="utf-8") == "sample_diff_1.svg\n"
+
+
+def test_main_updates_progress_for_completed_pairs(monkeypatch) -> None:
+    pairs = [
+        (Path("tests/fixtures/before/sample_same_1.svg"), Path("tests/fixtures/after/sample_same_1.svg")),
+        (Path("tests/fixtures/before/sample_diff_1.svg"), Path("tests/fixtures/after/sample_diff_1.svg")),
+    ]
+    progress_updates: list[tuple[int, int]] = []
+
+    class FakeFuture:
+        def __init__(self, result: bool) -> None:
+            self._result = result
+
+        def result(self) -> bool:
+            return self._result
+
+    class FakeExecutor:
+        def __init__(self, max_workers: int) -> None:
+            self._futures: list[FakeFuture] = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def submit(self, fn, before_path: Path, after_path: Path, remove_ids: list[str]):
+            future = FakeFuture(False)
+            self._futures.append(future)
+            return future
+
+    monkeypatch.setattr(
+        "svg_compare.cli.find_matched_svg_pairs",
+        lambda before_dir, after_dir, report_path=None: pairs,
+    )
+    monkeypatch.setattr("svg_compare.cli.ThreadPoolExecutor", FakeExecutor)
+    monkeypatch.setattr("svg_compare.cli.as_completed", lambda futures: list(futures))
+    monkeypatch.setattr(
+        "svg_compare.cli._print_progress",
+        lambda completed, total, started_at, different_count: progress_updates.append(
+            (completed, total, different_count)
+        ),
+    )
+
+    main(
+        before_dir=Path("tests/fixtures/before"),
+        after_dir=Path("tests/fixtures/after"),
+        remove_ids=["mycurrenttime"],
+    )
+
+    assert progress_updates == [(1, 2, 0), (2, 2, 0)]
 
 
 def test_parse_args_accepts_before_after_paths_and_multiple_remove_ids() -> None:
@@ -302,6 +357,23 @@ def test_run_cli_passes_parsed_values_to_main(monkeypatch) -> None:
     assert captured["debug"] is True
     assert captured["debug_svg_path"] == Path("tests/fixtures/before/sample_same_1.svg")
     assert captured["debug_output_group"] == "after"
+
+
+def test_format_progress_line_contains_percentage_and_eta() -> None:
+    line = _format_progress_line(
+        completed=25,
+        total=100,
+        elapsed_seconds=50.0,
+        different_count=7,
+    )
+
+    assert "[" in line
+    assert "]" in line
+    assert "25%" in line
+    assert "25/100" in line
+    assert "ETA" in line
+    assert "diff=7" in line
+    assert "elapsed" in line
 
 
 @pytest.mark.integration
