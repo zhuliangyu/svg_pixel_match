@@ -74,7 +74,7 @@ class PlaywrightSvgRenderer:
             )
         else:
             self._page.set_viewport_size({"width": width, "height": height})
-        self._page.set_content(svg_text)
+        self._page.set_content(svg_text, timeout=120000)
         self._wait_for_render_stability()
         locator = self._page.locator("svg").first
         locator.wait_for(state="attached")
