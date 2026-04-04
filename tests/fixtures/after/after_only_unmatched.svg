@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
+  <rect id="after-only-bg" x="12" y="12" width="96" height="96" fill="#e8f4ff" stroke="#225577" stroke-width="4" />
+  <circle id="after-only-dot" cx="60" cy="60" r="26" fill="#225577" />
+  <text id="mycurrenttime" x="10" y="22" font-size="12" font-weight="700" fill="#ff00aa" stroke="#000000" stroke-width="0.6">2026-04-04T09:00:00.999</text>
+</svg>
