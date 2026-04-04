@@ -1,8 +1,9 @@
 from pathlib import Path
+from queue import Queue
 
 import pytest
 
-from svg_compare.cli import _close_thread_renderer, _format_progress_line, _get_thread_renderer, main, parse_args, run_cli
+from svg_compare.cli import _close_thread_renderer, _format_progress_line, _get_thread_renderer, _worker_loop, main, parse_args, run_cli
 
 
 def test_main_prints_start_message(capsys) -> None:
@@ -472,6 +473,35 @@ def test_main_raises_worker_exception_instead_of_waiting_forever(monkeypatch) ->
             after_dir=Path("tests/fixtures/after"),
             remove_ids=["mycurrenttime"],
         )
+
+
+def test_worker_loop_logs_failed_filename(monkeypatch) -> None:
+    pair_queue = Queue()
+    result_queue = Queue()
+    stop_event = __import__("threading").Event()
+    error_messages: list[str] = []
+
+    pair_queue.put(
+        (
+            Path("tests/fixtures/before/sample_same_1.svg"),
+            Path("tests/fixtures/after/sample_same_1.svg"),
+        )
+    )
+
+    monkeypatch.setattr("svg_compare.cli._get_thread_renderer", lambda: object())
+    monkeypatch.setattr("svg_compare.cli._close_thread_renderer", lambda: None)
+    monkeypatch.setattr(
+        "svg_compare.cli._process_pair",
+        lambda matched_before_path, matched_after_path, remove_ids, renderer=None: (_ for _ in ()).throw(
+            PermissionError("Access is denied")
+        ),
+    )
+    monkeypatch.setattr("svg_compare.cli._log_error", lambda message: error_messages.append(message))
+
+    with pytest.raises(PermissionError, match="Access is denied"):
+        _worker_loop(pair_queue, result_queue, ["mycurrenttime"], stop_event)
+
+    assert any("sample_same_1.svg" in message for message in error_messages)
 
 
 def test_get_thread_renderer_reuses_renderer_in_same_thread(monkeypatch) -> None:

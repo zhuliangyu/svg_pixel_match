@@ -39,6 +39,33 @@ class PlaywrightSvgRenderer:
         if self._browser is None:
             self.start()
 
+        try:
+            return self._render_svg_to_png_once(
+                svg_text,
+                debug=debug,
+                debug_output_path=debug_output_path,
+            )
+        except Exception as exc:
+            if not _is_driver_connection_closed_error(exc):
+                raise
+
+            self.close()
+            self.start()
+            return self._render_svg_to_png_once(
+                svg_text,
+                debug=debug,
+                debug_output_path=debug_output_path,
+            )
+
+    def _render_svg_to_png_once(
+        self,
+        svg_text: str,
+        debug: bool = False,
+        debug_output_path: Path | None = None,
+    ) -> bytes:
+        if self._browser is None:
+            self.start()
+
         width, height = _extract_dimensions(svg_text)
         if self._page is None:
             self._page = self._browser.new_page(
@@ -84,3 +111,8 @@ def _extract_dimensions(svg_text: str) -> tuple[int, int]:
         raise ValueError("SVG width and height are required")
 
     return int(width_match.group(1)), int(height_match.group(1))
+
+
+def _is_driver_connection_closed_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "connection closed" in message and "driver" in message

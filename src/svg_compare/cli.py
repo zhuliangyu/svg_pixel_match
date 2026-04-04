@@ -216,6 +216,7 @@ def _worker_loop(
     remove_ids: list[str],
     stop_event: threading.Event,
 ) -> None:
+    current_filename: str | None = None
     try:
         renderer = _get_thread_renderer()
         while True:
@@ -228,6 +229,7 @@ def _worker_loop(
                 return
 
             matched_before_path, matched_after_path = matched_pair
+            current_filename = matched_before_path.name
             _log_info(f"[{threading.current_thread().name}] Processing pair: {matched_before_path.name}")
             is_different, before_png, after_png = _process_pair(
                 matched_before_path,
@@ -237,8 +239,14 @@ def _worker_loop(
             )
             result_queue.put((matched_before_path.name, is_different, before_png, after_png))
             _log_info(f"[{threading.current_thread().name}] Finished pair: {matched_before_path.name}")
+            current_filename = None
     except Exception as exc:
-        _log_error(f"[{threading.current_thread().name}] Worker failed: {exc!r}")
+        if current_filename is None:
+            _log_error(f"[{threading.current_thread().name}] Worker failed: {exc!r}")
+        else:
+            _log_error(
+                f"[{threading.current_thread().name}] Worker failed for {current_filename}: {exc!r}"
+            )
         raise
     finally:
         _close_thread_renderer()

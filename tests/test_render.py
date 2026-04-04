@@ -218,6 +218,87 @@ def test_render_svg_to_png_uses_first_svg_locator_when_page_contains_multiple_sv
     assert fake_manager.playwright.chromium.browser.page.svg_locator.screenshot_called is True
 
 
+def test_render_svg_to_png_restarts_renderer_and_retries_once_after_driver_disconnect(monkeypatch) -> None:
+    created_pages: list[FakePage] = []
+
+    class FakeLocator:
+        @property
+        def first(self) -> "FakeLocator":
+            return self
+
+        def wait_for(self, state: str) -> None:
+            assert state == "attached"
+
+        def screenshot(self, type: str) -> bytes:
+            assert type == "png"
+            return b"\x89PNG\r\n\x1a\nfake"
+
+    class FakePage:
+        def __init__(self, fail_once: bool) -> None:
+            self.fail_once = fail_once
+
+        def set_viewport_size(self, viewport: dict[str, int]) -> None:
+            return None
+
+        def set_content(self, svg_text: str) -> None:
+            if self.fail_once:
+                self.fail_once = False
+                raise Exception("Connection closed while reading from the driver")
+
+        def locator(self, selector: str) -> FakeLocator:
+            assert selector == "svg"
+            return FakeLocator()
+
+    class FakeBrowser:
+        def __init__(self, fail_once: bool) -> None:
+            self.fail_once = fail_once
+
+        def new_page(self, viewport: dict[str, int], device_scale_factor: int) -> FakePage:
+            page = FakePage(self.fail_once)
+            self.fail_once = False
+            created_pages.append(page)
+            return page
+
+        def close(self) -> None:
+            return None
+
+    class FakeChromium:
+        def __init__(self) -> None:
+            self.launch_count = 0
+
+        def launch(self) -> FakeBrowser:
+            self.launch_count += 1
+            return FakeBrowser(fail_once=self.launch_count == 1)
+
+    class FakePlaywright:
+        def __init__(self) -> None:
+            self.chromium = FakeChromium()
+
+    class FakeManager:
+        def __init__(self) -> None:
+            self.playwright = FakePlaywright()
+
+        def __enter__(self) -> FakePlaywright:
+            return self.playwright
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    fake_manager = FakeManager()
+    monkeypatch.setattr("svg_compare.render.sync_playwright", lambda: fake_manager)
+
+    renderer = PlaywrightSvgRenderer()
+    renderer.start()
+
+    png_bytes = renderer.render_svg_to_png('<svg width="120" height="120"></svg>')
+
+    renderer.close()
+
+    assert png_bytes.startswith(b"\x89PNG")
+    assert fake_manager.playwright.chromium.launch_count == 2
+    assert len(created_pages) == 2
+
+
 def _read_png_size(png_bytes: bytes) -> tuple[int, int]:
     width = int.from_bytes(png_bytes[16:20], byteorder="big")
     height = int.from_bytes(png_bytes[20:24], byteorder="big")
