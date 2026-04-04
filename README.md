@@ -122,6 +122,55 @@ python -m pytest tests/test_cli.py
 python -m pytest tests/test_cli.py -k expected_different_txt
 ```
 
+## Benchmark
+
+可以用仓库里的脚本批量生成大 SVG 基准数据。
+
+生成 `500` 对、单文件约 `1.5MB` 的测试数据：
+
+```powershell
+python tests/benchmarks/generate_large_svg_pairs.py `
+  --output-root tests/benchmarks/large_500_pairs `
+  --pairs 500 `
+  --target-bytes 1500000
+```
+
+生成后目录是：
+
+- `tests/benchmarks/large_500_pairs/before`
+- `tests/benchmarks/large_500_pairs/after`
+
+数据规则：
+
+- 前一半文件对渲染结果相同
+- 后一半文件对渲染结果不同
+
+运行 benchmark：
+
+```powershell
+$env:PYTHONPATH="src"
+python -m svg_compare.cli `
+  --before-dir tests/benchmarks/large_500_pairs/before `
+  --after-dir tests/benchmarks/large_500_pairs/after `
+  --concurrency 4
+```
+
+一次实际测得的参考结果：
+
+- 数据规模：`500` 对，`1000` 张 SVG
+- 单文件大小：平均约 `1.5MB`
+- 总耗时：约 `531.31` 秒
+- 每 `100` 张图片平均耗时：约 `53.13` 秒
+- 每 `100` 对平均耗时：约 `106.26` 秒
+
+这个结果会受以下因素影响：
+
+- CPU 性能
+- 磁盘速度
+- Playwright Chromium 启动开销
+- SVG 的复杂度
+- 并发数设置
+
 ## 当前输出说明
 
 - `different.txt`

@@ -1,3 +1,4 @@
+tests/benchmarks/large_500_pairs/*
 outputs/*
 # Byte-compiled / optimized / DLL files
 __pycache__/
