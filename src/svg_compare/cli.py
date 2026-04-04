@@ -27,12 +27,16 @@ def main(
     debug_output_group: str = "before",
 ) -> None:
     outputs_dir = output_dir or Path("outputs")
+    _log_info(f"Clearing output directory: {outputs_dir}")
     _clear_output_files(outputs_dir)
     different_filenames: list[str] = []
 
-    print("Start svg pixel matching")
+    _log_info("Output directory is ready")
+    _log_info("Start svg pixel matching")
 
     if before_dir is not None and after_dir is not None:
+        _log_info(f"Scanning before directory: {before_dir}")
+        _log_info(f"Scanning after directory: {after_dir}")
         matched_pairs = find_matched_svg_pairs(
             before_dir,
             after_dir,
@@ -40,8 +44,10 @@ def main(
         )
         started_at = time.perf_counter()
         total = len(matched_pairs)
+        _log_info(f"Found {total} matched SVG pairs")
         if total > 0:
             worker_count = min(max(1, concurrency), total)
+            _log_info(f"Starting {worker_count} worker threads")
             pair_queue: Queue[tuple[Path, Path] | None] = Queue()
             result_queue: Queue[tuple[str, bool, bytes, bytes]] = Queue()
             stop_event = threading.Event()
@@ -68,6 +74,7 @@ def main(
                 while completed < total:
                     result = _wait_for_next_result(result_queue)
                     if result is None:
+                        _raise_completed_worker_exception(futures)
                         continue
 
                     filename, is_different, before_png, after_png = result
@@ -85,6 +92,7 @@ def main(
                 for future in futures:
                     future.result()
             except KeyboardInterrupt:
+                _log_info("KeyboardInterrupt received, stopping workers")
                 _request_worker_stop(pair_queue, worker_count, stop_event)
                 executor.shutdown(wait=False, cancel_futures=True)
                 raise
@@ -96,8 +104,10 @@ def main(
             "".join(f"{filename}\n" for filename in sorted(different_filenames)),
             encoding="utf-8",
         )
+        _log_info(f"Wrote different file list: {outputs_dir / 'different.txt'}")
 
     if debug and debug_svg_path is not None:
+        _log_info(f"Rendering debug SVG: {debug_svg_path}")
         svg_text = debug_svg_path.read_text(encoding="utf-8")
         debug_output_path = outputs_dir / "debug" / debug_output_group / f"{debug_svg_path.stem}.png"
         render_svg_to_png(
@@ -105,6 +115,7 @@ def main(
             debug=True,
             debug_output_path=debug_output_path,
         )
+        _log_info(f"Wrote debug PNG: {debug_output_path}")
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -205,16 +216,19 @@ def _worker_loop(
     remove_ids: list[str],
     stop_event: threading.Event,
 ) -> None:
-    renderer = _get_thread_renderer()
     try:
+        renderer = _get_thread_renderer()
         while True:
             if stop_event.is_set():
+                _log_info(f"[{threading.current_thread().name}] Stop requested, worker exits")
                 return
             matched_pair = pair_queue.get()
             if matched_pair is None:
+                _log_info(f"[{threading.current_thread().name}] No more work, worker exits")
                 return
 
             matched_before_path, matched_after_path = matched_pair
+            _log_info(f"[{threading.current_thread().name}] Processing pair: {matched_before_path.name}")
             is_different, before_png, after_png = _process_pair(
                 matched_before_path,
                 matched_after_path,
@@ -222,6 +236,10 @@ def _worker_loop(
                 renderer,
             )
             result_queue.put((matched_before_path.name, is_different, before_png, after_png))
+            _log_info(f"[{threading.current_thread().name}] Finished pair: {matched_before_path.name}")
+    except Exception as exc:
+        _log_error(f"[{threading.current_thread().name}] Worker failed: {exc!r}")
+        raise
     finally:
         _close_thread_renderer()
 
@@ -246,9 +264,11 @@ def _process_pair(
 def _get_thread_renderer() -> PlaywrightSvgRenderer:
     renderer = getattr(_THREAD_RENDERER, "renderer", None)
     if renderer is None:
+        _log_info(f"[{threading.current_thread().name}] Starting Playwright Chromium renderer")
         renderer = PlaywrightSvgRenderer()
         renderer.start()
         _THREAD_RENDERER.renderer = renderer
+        _log_info(f"[{threading.current_thread().name}] Playwright Chromium renderer is ready")
     return renderer
 
 
@@ -258,6 +278,7 @@ def _close_thread_renderer() -> None:
         return
 
     try:
+        _log_info(f"[{threading.current_thread().name}] Closing Playwright Chromium renderer")
         renderer.close()
     finally:
         _THREAD_RENDERER.renderer = None
@@ -281,6 +302,28 @@ def _request_worker_stop(
     stop_event.set()
     for _ in range(worker_count):
         pair_queue.put(None)
+
+
+def _raise_completed_worker_exception(futures: list[object]) -> None:
+    for future in futures:
+        done = getattr(future, "done", None)
+        if callable(done) and not future.done():
+            continue
+
+        exception = getattr(future, "exception", None)
+        if callable(exception):
+            error = future.exception()
+            if error is not None:
+                _log_error(f"Worker future failed: {error!r}")
+                raise error
+
+
+def _log_info(message: str) -> None:
+    print(f"[INFO] {message}", file=sys.stdout, flush=True)
+
+
+def _log_error(message: str) -> None:
+    print(f"[ERROR] {message}", file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":

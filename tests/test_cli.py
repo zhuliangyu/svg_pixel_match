@@ -10,7 +10,9 @@ def test_main_prints_start_message(capsys) -> None:
 
     captured = capsys.readouterr()
 
-    assert captured.out == "Start svg pixel matching\n"
+    assert "Start svg pixel matching" in captured.out
+    assert "Clearing output directory" in captured.out
+    assert "Output directory is ready" in captured.out
 
 
 def test_main_deletes_all_files_in_outputs_before_running() -> None:
@@ -430,6 +432,46 @@ def test_main_requests_worker_stop_when_interrupted(monkeypatch) -> None:
     pair_queue = queue_instances[0]
     assert shutdown_calls == [(False, True)]
     assert pair_queue.put_calls.count(None) == 2
+
+
+def test_main_raises_worker_exception_instead_of_waiting_forever(monkeypatch) -> None:
+    pairs = [
+        (Path("tests/fixtures/before/sample_same_1.svg"), Path("tests/fixtures/after/sample_same_1.svg")),
+    ]
+
+    class FakeFuture:
+        def done(self) -> bool:
+            return True
+
+        def exception(self):
+            return PermissionError("Access is denied")
+
+        def result(self) -> None:
+            raise PermissionError("Access is denied")
+
+    class FakeExecutor:
+        def __init__(self, max_workers: int) -> None:
+            return None
+
+        def submit(self, fn, pair_queue, result_queue, remove_ids: list[str], stop_event):
+            return FakeFuture()
+
+        def shutdown(self, wait: bool = True, cancel_futures: bool = False) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "svg_compare.cli.find_matched_svg_pairs",
+        lambda before_dir, after_dir, report_path=None: pairs,
+    )
+    monkeypatch.setattr("svg_compare.cli.ThreadPoolExecutor", FakeExecutor)
+    monkeypatch.setattr("svg_compare.cli._wait_for_next_result", lambda result_queue, timeout_seconds=0.2: None)
+
+    with pytest.raises(PermissionError, match="Access is denied"):
+        main(
+            before_dir=Path("tests/fixtures/before"),
+            after_dir=Path("tests/fixtures/after"),
+            remove_ids=["mycurrenttime"],
+        )
 
 
 def test_get_thread_renderer_reuses_renderer_in_same_thread(monkeypatch) -> None:
