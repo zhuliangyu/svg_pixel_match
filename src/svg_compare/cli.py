@@ -16,6 +16,7 @@ from svg_compare.render import PlaywrightSvgRenderer, render_svg_to_png
 _THREAD_RENDERER = threading.local()
 _ERROR_LOG_LOCK = threading.Lock()
 _ERROR_LOG_PATH: Path | None = None
+_ERROR_SVGS_DIR: Path | None = None
 
 
 def main(
@@ -28,12 +29,14 @@ def main(
     debug_svg_path: Path | None = None,
     debug_output_group: str = "before",
 ) -> None:
-    global _ERROR_LOG_PATH
+    global _ERROR_LOG_PATH, _ERROR_SVGS_DIR
     outputs_dir = output_dir or Path("outputs")
     _log_info(f"Clearing output directory: {outputs_dir}")
     _clear_output_files(outputs_dir)
     previous_error_log_path = _ERROR_LOG_PATH
+    previous_error_svgs_dir = _ERROR_SVGS_DIR
     _ERROR_LOG_PATH = outputs_dir / "errors.txt"
+    _ERROR_SVGS_DIR = outputs_dir / "errors_svgs"
     different_filenames: list[str] = []
     try:
         _log_info("Output directory is ready")
@@ -128,6 +131,7 @@ def main(
             _log_info(f"Wrote debug PNG: {debug_output_path}")
     finally:
         _ERROR_LOG_PATH = previous_error_log_path
+        _ERROR_SVGS_DIR = previous_error_svgs_dir
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -168,6 +172,8 @@ def _clear_output_files(outputs_dir: Path) -> None:
             path.unlink()
         elif path.is_dir():
             shutil.rmtree(path)
+
+
 def _print_different_filename(filename: str) -> None:
     print(f"DIFF {filename}", file=sys.stdout, flush=True)
 
@@ -229,6 +235,8 @@ def _worker_loop(
     stop_event: threading.Event,
 ) -> None:
     current_filename: str | None = None
+    current_before_path: Path | None = None
+    current_after_path: Path | None = None
     try:
         renderer = _get_thread_renderer()
         while True:
@@ -241,6 +249,8 @@ def _worker_loop(
                 return
 
             matched_before_path, matched_after_path = matched_pair
+            current_before_path = matched_before_path
+            current_after_path = matched_after_path
             current_filename = matched_before_path.name
             _log_info(f"[{threading.current_thread().name}] Processing pair: {matched_before_path.name}")
             is_different, before_png, after_png = _process_pair(
@@ -259,6 +269,8 @@ def _worker_loop(
                 )
             )
             _log_info(f"[{threading.current_thread().name}] Finished pair: {matched_before_path.name}")
+            current_before_path = None
+            current_after_path = None
             current_filename = None
     except Exception as exc:
         if current_filename is None:
@@ -267,6 +279,8 @@ def _worker_loop(
             _log_error(
                 f"[{threading.current_thread().name}] Worker failed for {current_filename}: {exc!r}"
             )
+            if current_before_path is not None and current_after_path is not None:
+                _copy_error_svgs(current_before_path, current_after_path)
         raise
     finally:
         _close_thread_renderer()
@@ -359,6 +373,16 @@ def _log_error(message: str) -> None:
         _ERROR_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with _ERROR_LOG_PATH.open("a", encoding="utf-8") as error_file:
             error_file.write(f"{message}\n")
+
+
+def _copy_error_svgs(before_path: Path, after_path: Path) -> None:
+    if _ERROR_SVGS_DIR is None:
+        return
+
+    target_dir = _ERROR_SVGS_DIR / before_path.stem
+    target_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(before_path, target_dir / "before.svg")
+    shutil.copyfile(after_path, target_dir / "after.svg")
 
 
 if __name__ == "__main__":

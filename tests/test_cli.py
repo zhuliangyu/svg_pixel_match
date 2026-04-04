@@ -1,5 +1,6 @@
 from pathlib import Path
 from queue import Queue
+import shutil
 
 import pytest
 
@@ -511,6 +512,40 @@ def test_worker_loop_logs_failed_filename(monkeypatch) -> None:
         _worker_loop(pair_queue, result_queue, ["mycurrenttime"], stop_event)
 
     assert any("sample_same_1.svg" in message for message in error_messages)
+
+
+def test_worker_loop_copies_failed_pair_svgs_into_errors_directory(monkeypatch) -> None:
+    pair_queue = Queue()
+    result_queue = Queue()
+    stop_event = __import__("threading").Event()
+    before_path = Path("tests/fixtures/before/sample_same_1.svg")
+    after_path = Path("tests/fixtures/after/sample_same_1.svg")
+    errors_svgs_dir = Path("outputs_error_svgs_test")
+    if errors_svgs_dir.exists():
+        shutil.rmtree(errors_svgs_dir)
+
+    pair_queue.put((before_path, after_path))
+
+    monkeypatch.setattr("svg_compare.cli._get_thread_renderer", lambda: object())
+    monkeypatch.setattr("svg_compare.cli._close_thread_renderer", lambda: None)
+    monkeypatch.setattr(
+        "svg_compare.cli._process_pair",
+        lambda matched_before_path, matched_after_path, remove_ids, renderer=None: (_ for _ in ()).throw(
+            TimeoutError("render timed out")
+        ),
+    )
+    monkeypatch.setattr("svg_compare.cli._ERROR_SVGS_DIR", errors_svgs_dir)
+
+    try:
+        with pytest.raises(TimeoutError, match="render timed out"):
+            _worker_loop(pair_queue, result_queue, ["mycurrenttime"], stop_event)
+
+        error_dir = errors_svgs_dir / "sample_same_1"
+        assert (error_dir / "before.svg").read_text(encoding="utf-8") == before_path.read_text(encoding="utf-8")
+        assert (error_dir / "after.svg").read_text(encoding="utf-8") == after_path.read_text(encoding="utf-8")
+    finally:
+        if errors_svgs_dir.exists():
+            shutil.rmtree(errors_svgs_dir)
 
 
 def test_get_thread_renderer_reuses_renderer_in_same_thread(monkeypatch) -> None:
