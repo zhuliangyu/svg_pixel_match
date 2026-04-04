@@ -31,7 +31,7 @@ def test_render_svg_to_png_preserves_svg_dimensions() -> None:
 
 def test_render_svg_to_png_writes_debug_png_into_outputs_before() -> None:
     svg_text = SAMPLE_SVG_PATH.read_text(encoding="utf-8")
-    debug_path = Path("outputs") / "before" / "sample_same_1.png"
+    debug_path = Path("outputs") / "debug" / "before" / "sample_same_1.png"
 
     if debug_path.exists():
         debug_path.unlink()
@@ -48,7 +48,7 @@ def test_render_svg_to_png_writes_debug_png_into_outputs_before() -> None:
 
 def test_render_svg_to_png_does_not_write_debug_png_when_flag_is_false() -> None:
     svg_text = SAMPLE_SVG_PATH.read_text(encoding="utf-8")
-    debug_path = Path("outputs") / "after" / "sample_same_1.png"
+    debug_path = Path("outputs") / "debug" / "after" / "sample_same_1.png"
 
     if debug_path.exists():
         debug_path.unlink()

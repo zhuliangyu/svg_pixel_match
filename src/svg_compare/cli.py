@@ -85,7 +85,7 @@ def main(
 
     if debug and debug_svg_path is not None:
         svg_text = debug_svg_path.read_text(encoding="utf-8")
-        debug_output_path = outputs_dir / debug_output_group / f"{debug_svg_path.stem}.png"
+        debug_output_path = outputs_dir / "debug" / debug_output_group / f"{debug_svg_path.stem}.png"
         render_svg_to_png(
             svg_text,
             debug=True,

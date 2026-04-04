@@ -63,7 +63,7 @@ def test_main_passes_debug_render_output_to_before_directory(monkeypatch) -> Non
     )
 
     assert captured["debug"] is True
-    assert captured["debug_output_path"] == Path("outputs") / "before" / "sample_same_1.png"
+    assert captured["debug_output_path"] == Path("outputs") / "debug" / "before" / "sample_same_1.png"
     assert "sample_same_1" not in str(captured["svg_text"])
 
 

@@ -12,6 +12,7 @@
 - 输出：
   - `outputs/different.txt`
   - `outputs/unmatched_svgs.txt`
+  - `outputs/diff_details/`
 
 ## 环境要求
 
@@ -85,6 +86,7 @@ python -m svg_compare.cli `
 
 - `outputs/different.txt`
 - `outputs/unmatched_svgs.txt`
+- `outputs/diff_details/<filename-stem>/`
 
 ## Debug 渲染
 
@@ -105,7 +107,7 @@ python -m svg_compare.cli `
 
 这会额外输出：
 
-- `outputs/before/sample_same_1.png`
+- `outputs/debug/before/sample_same_1.png`
 
 `--debug-output-group` 只允许：
 
@@ -133,7 +135,7 @@ python -m pytest tests/test_cli.py
 跑集成测试：
 
 ```powershell
-python -m pytest tests/test_cli.py -k expected_different_txt
+python -m pytest tests/test_cli.py -k integration
 ```
 
 ## Benchmark
@@ -193,6 +195,16 @@ python -m svg_compare.cli `
   - 一行一个渲染后不同的文件名
 - `unmatched_svgs.txt`
   - 一行一个未配对的 `.svg` 文件名
+- `diff_details/<filename-stem>/before.png`
+  - 差异文件对应的 before 渲染图
+- `diff_details/<filename-stem>/after.png`
+  - 差异文件对应的 after 渲染图
+- `diff_details/<filename-stem>/diff.png`
+  - 相同像素透明，不同像素高亮为红色
+- `debug/before/*.png`
+  - 手动开启 `--debug --debug-output-group before` 时的单图渲染输出
+- `debug/after/*.png`
+  - 手动开启 `--debug --debug-output-group after` 时的单图渲染输出
 
 ## 当前限制
 
