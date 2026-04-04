@@ -19,8 +19,7 @@ def write_diff_details(left_png: bytes, right_png: bytes, output_dir: Path) -> N
     right_image = Image.open(BytesIO(right_png)).convert("RGBA")
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    left_image.save(output_dir / "before.png")
-    right_image.save(output_dir / "after.png")
+    _build_side_by_side_image(left_image, right_image).save(output_dir / "before_after.png")
     _build_diff_image(left_image, right_image).save(output_dir / "diff.png")
 
 
@@ -42,6 +41,15 @@ def _build_diff_image(left_image: Image.Image, right_image: Image.Image) -> Imag
                 diff_pixels[x, y] = (255, 0, 0, 255)
 
     return diff_image
+
+
+def _build_side_by_side_image(left_image: Image.Image, right_image: Image.Image) -> Image.Image:
+    combined_width = left_image.width + right_image.width
+    combined_height = max(left_image.height, right_image.height)
+    combined_image = Image.new("RGBA", (combined_width, combined_height), (0, 0, 0, 0))
+    combined_image.paste(left_image, (0, 0))
+    combined_image.paste(right_image, (left_image.width, 0))
+    return combined_image
 
 
 def _get_pixel_or_none(
