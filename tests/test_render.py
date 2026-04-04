@@ -66,6 +66,10 @@ def test_playwright_svg_renderer_reuses_single_page_for_multiple_renders(monkeyp
     created_pages: list[FakePage] = []
 
     class FakeLocator:
+        @property
+        def first(self) -> "FakeLocator":
+            return self
+
         def wait_for(self, state: str) -> None:
             assert state == "attached"
 
@@ -130,6 +134,88 @@ def test_playwright_svg_renderer_reuses_single_page_for_multiple_renders(monkeyp
         {"width": 120, "height": 120},
         {"width": 140, "height": 100},
     ]
+
+
+def test_render_svg_to_png_uses_first_svg_locator_when_page_contains_multiple_svgs(monkeypatch) -> None:
+    class FakeLocator:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.wait_called = False
+            self.screenshot_called = False
+
+        @property
+        def first(self) -> "FakeLocator":
+            return self
+
+        def wait_for(self, state: str) -> None:
+            assert state == "attached"
+            self.wait_called = True
+
+        def screenshot(self, type: str) -> bytes:
+            assert type == "png"
+            self.screenshot_called = True
+            return b"\x89PNG\r\n\x1a\nfake"
+
+    class FakePage:
+        def __init__(self) -> None:
+            self.svg_locator = FakeLocator("first-svg")
+
+        def set_viewport_size(self, viewport: dict[str, int]) -> None:
+            return None
+
+        def set_content(self, svg_text: str) -> None:
+            return None
+
+        def locator(self, selector: str) -> FakeLocator:
+            assert selector == "svg"
+            return self.svg_locator
+
+    class FakeBrowser:
+        def __init__(self) -> None:
+            self.page = FakePage()
+
+        def new_page(self, viewport: dict[str, int], device_scale_factor: int) -> FakePage:
+            return self.page
+
+        def close(self) -> None:
+            return None
+
+    class FakeChromium:
+        def __init__(self) -> None:
+            self.browser = FakeBrowser()
+
+        def launch(self) -> FakeBrowser:
+            return self.browser
+
+    class FakePlaywright:
+        def __init__(self) -> None:
+            self.chromium = FakeChromium()
+
+    class FakeManager:
+        def __init__(self) -> None:
+            self.playwright = FakePlaywright()
+
+        def __enter__(self) -> FakePlaywright:
+            return self.playwright
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    fake_manager = FakeManager()
+    monkeypatch.setattr("svg_compare.render.sync_playwright", lambda: fake_manager)
+
+    renderer = PlaywrightSvgRenderer()
+    renderer.start()
+
+    png_bytes = renderer.render_svg_to_png(
+        '<svg width="120" height="120" id="container_svg"><svg id="chart_svg"></svg></svg>'
+    )
+
+    renderer.close()
+
+    assert png_bytes.startswith(b"\x89PNG")
+    assert fake_manager.playwright.chromium.browser.page.svg_locator.wait_called is True
+    assert fake_manager.playwright.chromium.browser.page.svg_locator.screenshot_called is True
 
 
 def _read_png_size(png_bytes: bytes) -> tuple[int, int]:
