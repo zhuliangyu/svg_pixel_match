@@ -89,6 +89,35 @@ def test_write_diff_details_writes_before_after_and_red_diff_images() -> None:
     output_dir.rmdir()
 
 
+def test_write_diff_details_handles_different_png_sizes() -> None:
+    before_image = Image.new("RGBA", (2, 1), (0, 255, 0, 255))
+    after_image = Image.new("RGBA", (3, 1), (0, 255, 0, 255))
+
+    before_png = _to_png_bytes(before_image)
+    after_png = _to_png_bytes(after_image)
+
+    output_dir = Path("outputs") / "test_diff_details_different_sizes"
+    if output_dir.exists():
+        for path in output_dir.iterdir():
+            path.unlink()
+        output_dir.rmdir()
+
+    write_diff_details(before_png, after_png, output_dir)
+
+    written_diff = Image.open(output_dir / "diff.png").convert("RGBA")
+
+    assert written_diff.size == (3, 1)
+    assert _read_pixels(written_diff) == [
+        (0, 0, 0, 0),
+        (0, 0, 0, 0),
+        (255, 0, 0, 255),
+    ]
+
+    for path in output_dir.iterdir():
+        path.unlink()
+    output_dir.rmdir()
+
+
 def _to_png_bytes(image: Image.Image) -> bytes:
     from io import BytesIO
 
