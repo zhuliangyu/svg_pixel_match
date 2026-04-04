@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from svg_compare.cli import _format_progress_line, main, parse_args, run_cli
+from svg_compare.cli import _close_thread_renderer, _format_progress_line, _get_thread_renderer, main, parse_args, run_cli
 
 
 def test_main_prints_start_message(capsys) -> None:
@@ -100,8 +100,12 @@ def test_main_pairs_svg_files_and_preprocesses_before_and_after(monkeypatch) -> 
         preprocess_calls.append((svg_text, remove_ids))
         return svg_text
 
+    class FakeRenderer:
+        def render_svg_to_png(self, svg_text: str) -> bytes:
+            return b"png"
+
     monkeypatch.setattr("svg_compare.cli.preprocess_svg", fake_preprocess_svg)
-    monkeypatch.setattr("svg_compare.cli.render_svg_to_png", lambda svg_text, debug=False, debug_output_path=None: b"png")
+    monkeypatch.setattr("svg_compare.cli._get_thread_renderer", lambda: FakeRenderer())
     monkeypatch.setattr("svg_compare.cli.compare_png_bytes", lambda before_png, after_png: True)
 
     main(
@@ -134,19 +138,16 @@ def test_main_renders_preprocessed_svgs_and_compares_pngs(monkeypatch) -> None:
         lambda svg_text, remove_ids: f"processed::{svg_text}",
     )
 
-    def fake_render_svg_to_png(
-        svg_text: str,
-        debug: bool = False,
-        debug_output_path: Path | None = None,
-    ) -> bytes:
-        render_calls.append(svg_text)
-        return f"png::{len(render_calls)}".encode()
+    class FakeRenderer:
+        def render_svg_to_png(self, svg_text: str) -> bytes:
+            render_calls.append(svg_text)
+            return f"png::{len(render_calls)}".encode()
 
     def fake_compare_png_bytes(before_png: bytes, after_png: bytes) -> bool:
         compare_calls.append((before_png, after_png))
         return True
 
-    monkeypatch.setattr("svg_compare.cli.render_svg_to_png", fake_render_svg_to_png)
+    monkeypatch.setattr("svg_compare.cli._get_thread_renderer", lambda: FakeRenderer())
     monkeypatch.setattr("svg_compare.cli.compare_png_bytes", fake_compare_png_bytes)
 
     main(
@@ -170,8 +171,12 @@ def test_main_writes_different_filename_when_compare_returns_false(monkeypatch) 
         "svg_compare.cli.find_matched_svg_pairs",
         lambda before_dir, after_dir, report_path=None: [(before_path, after_path)],
     )
+    class FakeRenderer:
+        def render_svg_to_png(self, svg_text: str) -> bytes:
+            return b"png"
+
     monkeypatch.setattr("svg_compare.cli.preprocess_svg", lambda svg_text, remove_ids: svg_text)
-    monkeypatch.setattr("svg_compare.cli.render_svg_to_png", lambda svg_text, debug=False, debug_output_path=None: b"png")
+    monkeypatch.setattr("svg_compare.cli._get_thread_renderer", lambda: FakeRenderer())
     monkeypatch.setattr("svg_compare.cli.compare_png_bytes", lambda before_png, after_png: False)
     monkeypatch.setattr("svg_compare.cli._print_different_filename", lambda filename: printed_diffs.append(filename))
 
@@ -190,15 +195,12 @@ def test_main_processes_pairs_with_configured_concurrency(monkeypatch) -> None:
         (Path("tests/fixtures/before/sample_same_1.svg"), Path("tests/fixtures/after/sample_same_1.svg")),
         (Path("tests/fixtures/before/sample_diff_1.svg"), Path("tests/fixtures/after/sample_diff_1.svg")),
     ]
-    submitted: list[tuple[Path, Path]] = []
+    submitted_worker_count = 0
     requested_workers: int | None = None
 
     class FakeFuture:
-        def __init__(self, result: bool) -> None:
-            self._result = result
-
-        def result(self) -> bool:
-            return self._result
+        def result(self) -> None:
+            return None
 
     class FakeExecutor:
         def __init__(self, max_workers: int) -> None:
@@ -211,17 +213,30 @@ def test_main_processes_pairs_with_configured_concurrency(monkeypatch) -> None:
         def __exit__(self, exc_type, exc, tb) -> None:
             return None
 
-        def submit(self, fn, before_path: Path, after_path: Path, remove_ids: list[str]):
-            submitted.append((before_path, after_path))
-            result = before_path.name == "sample_diff_1.svg"
-            return FakeFuture(result)
+        def submit(self, fn, pair_queue, result_queue, remove_ids: list[str]):
+            nonlocal submitted_worker_count
+            submitted_worker_count += 1
+            fn(pair_queue, result_queue, remove_ids)
+            return FakeFuture()
 
     monkeypatch.setattr(
         "svg_compare.cli.find_matched_svg_pairs",
         lambda before_dir, after_dir, report_path=None: pairs,
     )
     monkeypatch.setattr("svg_compare.cli.ThreadPoolExecutor", FakeExecutor)
-    monkeypatch.setattr("svg_compare.cli.as_completed", lambda futures: list(futures))
+    class FakeRenderer:
+        def render_svg_to_png(self, svg_text: str) -> bytes:
+            return b"png"
+
+    compare_results = iter([True, False])
+
+    monkeypatch.setattr("svg_compare.cli._get_thread_renderer", lambda: FakeRenderer())
+    monkeypatch.setattr("svg_compare.cli._close_thread_renderer", lambda: None)
+    monkeypatch.setattr("svg_compare.cli.preprocess_svg", lambda svg_text, remove_ids: svg_text)
+    monkeypatch.setattr(
+        "svg_compare.cli.compare_png_bytes",
+        lambda before_png, after_png: next(compare_results),
+    )
 
     main(
         before_dir=Path("tests/fixtures/before"),
@@ -230,8 +245,8 @@ def test_main_processes_pairs_with_configured_concurrency(monkeypatch) -> None:
         concurrency=3,
     )
 
-    assert requested_workers == 3
-    assert submitted == pairs
+    assert requested_workers == 2
+    assert submitted_worker_count == 2
     assert (Path("outputs") / "different.txt").read_text(encoding="utf-8") == "sample_diff_1.svg\n"
 
 
@@ -259,7 +274,8 @@ def test_main_updates_progress_for_completed_pairs(monkeypatch) -> None:
         def __exit__(self, exc_type, exc, tb) -> None:
             return None
 
-        def submit(self, fn, before_path: Path, after_path: Path, remove_ids: list[str]):
+        def submit(self, fn, pair_queue, result_queue, remove_ids: list[str]):
+            fn(pair_queue, result_queue, remove_ids)
             future = FakeFuture(False)
             self._futures.append(future)
             return future
@@ -269,7 +285,14 @@ def test_main_updates_progress_for_completed_pairs(monkeypatch) -> None:
         lambda before_dir, after_dir, report_path=None: pairs,
     )
     monkeypatch.setattr("svg_compare.cli.ThreadPoolExecutor", FakeExecutor)
-    monkeypatch.setattr("svg_compare.cli.as_completed", lambda futures: list(futures))
+    class FakeRenderer:
+        def render_svg_to_png(self, svg_text: str) -> bytes:
+            return b"png"
+
+    monkeypatch.setattr("svg_compare.cli._get_thread_renderer", lambda: FakeRenderer())
+    monkeypatch.setattr("svg_compare.cli._close_thread_renderer", lambda: None)
+    monkeypatch.setattr("svg_compare.cli.preprocess_svg", lambda svg_text, remove_ids: svg_text)
+    monkeypatch.setattr("svg_compare.cli.compare_png_bytes", lambda before_png, after_png: True)
     monkeypatch.setattr(
         "svg_compare.cli._print_progress",
         lambda completed, total, started_at, different_count: progress_updates.append(
@@ -284,6 +307,47 @@ def test_main_updates_progress_for_completed_pairs(monkeypatch) -> None:
     )
 
     assert progress_updates == [(1, 2, 0), (2, 2, 0)]
+
+
+def test_get_thread_renderer_reuses_renderer_in_same_thread(monkeypatch) -> None:
+    created_renderers: list[object] = []
+
+    class FakeRenderer:
+        def start(self) -> None:
+            return None
+
+    import threading
+
+    monkeypatch.setattr("svg_compare.cli._THREAD_RENDERER", threading.local())
+    monkeypatch.setattr(
+        "svg_compare.cli.PlaywrightSvgRenderer",
+        lambda: created_renderers.append(FakeRenderer()) or created_renderers[-1],
+    )
+
+    first = _get_thread_renderer()
+    second = _get_thread_renderer()
+
+    assert first is second
+    assert len(created_renderers) == 1
+
+
+def test_close_thread_renderer_closes_current_thread_renderer(monkeypatch) -> None:
+    closed: list[str] = []
+
+    class FakeRenderer:
+        def close(self) -> None:
+            closed.append("closed")
+
+    import threading
+
+    thread_local = threading.local()
+    thread_local.renderer = FakeRenderer()
+    monkeypatch.setattr("svg_compare.cli._THREAD_RENDERER", thread_local)
+
+    _close_thread_renderer()
+
+    assert closed == ["closed"]
+    assert getattr(thread_local, "renderer") is None
 
 
 def test_parse_args_accepts_before_after_paths_and_multiple_remove_ids() -> None:

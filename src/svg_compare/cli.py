@@ -1,15 +1,20 @@
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
+from queue import Queue
 import shutil
 import sys
+import threading
 import time
 
 from svg_compare.compare import compare_png_bytes
 from svg_compare.pairing import find_matched_svg_pairs
 from svg_compare.preprocess import preprocess_svg
-from svg_compare.render import render_svg_to_png
+from svg_compare.render import PlaywrightSvgRenderer, render_svg_to_png
+
+
+_THREAD_RENDERER = threading.local()
 
 
 def main(
@@ -34,27 +39,39 @@ def main(
             report_path=outputs_dir / "unmatched_svgs.txt",
         )
         started_at = time.perf_counter()
+        total = len(matched_pairs)
+        if total > 0:
+            worker_count = min(max(1, concurrency), total)
+            pair_queue: Queue[tuple[Path, Path] | None] = Queue()
+            result_queue: Queue[tuple[str, bool]] = Queue()
 
-        with ThreadPoolExecutor(max_workers=max(1, concurrency)) as executor:
-            futures = {
-                executor.submit(
-                    _process_pair,
-                    matched_before_path,
-                    matched_after_path,
-                    remove_ids or [],
-                ): matched_before_path.name
-                for matched_before_path, matched_after_path in matched_pairs
-            }
+            for matched_pair in matched_pairs:
+                pair_queue.put(matched_pair)
+            for _ in range(worker_count):
+                pair_queue.put(None)
 
-            completed = 0
-            total = len(futures)
-            for future in as_completed(futures):
-                filename = futures[future]
-                if future.result():
-                    different_filenames.append(filename)
-                    _print_different_filename(filename)
-                completed += 1
-                _print_progress(completed, total, started_at, len(different_filenames))
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = [
+                    executor.submit(
+                        _worker_loop,
+                        pair_queue,
+                        result_queue,
+                        remove_ids or [],
+                    )
+                    for _ in range(worker_count)
+                ]
+
+                completed = 0
+                while completed < total:
+                    filename, is_different = result_queue.get()
+                    if is_different:
+                        different_filenames.append(filename)
+                        _print_different_filename(filename)
+                    completed += 1
+                    _print_progress(completed, total, started_at, len(different_filenames))
+
+                for future in futures:
+                    future.result()
 
         (outputs_dir / "different.txt").write_text(
             "".join(f"{filename}\n" for filename in sorted(different_filenames)),
@@ -173,18 +190,65 @@ def _format_seconds(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
+def _worker_loop(
+    pair_queue: Queue[tuple[Path, Path] | None],
+    result_queue: Queue[tuple[str, bool]],
+    remove_ids: list[str],
+) -> None:
+    renderer = _get_thread_renderer()
+    try:
+        while True:
+            matched_pair = pair_queue.get()
+            if matched_pair is None:
+                return
+
+            matched_before_path, matched_after_path = matched_pair
+            is_different = _process_pair(
+                matched_before_path,
+                matched_after_path,
+                remove_ids,
+                renderer,
+            )
+            result_queue.put((matched_before_path.name, is_different))
+    finally:
+        _close_thread_renderer()
+
+
 def _process_pair(
     matched_before_path: Path,
     matched_after_path: Path,
     remove_ids: list[str],
+    renderer: PlaywrightSvgRenderer | None = None,
 ) -> bool:
+    if renderer is None:
+        renderer = _get_thread_renderer()
     matched_before_svg = matched_before_path.read_text(encoding="utf-8")
     matched_after_svg = matched_after_path.read_text(encoding="utf-8")
     processed_before_svg = preprocess_svg(matched_before_svg, remove_ids)
     processed_after_svg = preprocess_svg(matched_after_svg, remove_ids)
-    before_png = render_svg_to_png(processed_before_svg)
-    after_png = render_svg_to_png(processed_after_svg)
+    before_png = renderer.render_svg_to_png(processed_before_svg)
+    after_png = renderer.render_svg_to_png(processed_after_svg)
     return not compare_png_bytes(before_png, after_png)
+
+
+def _get_thread_renderer() -> PlaywrightSvgRenderer:
+    renderer = getattr(_THREAD_RENDERER, "renderer", None)
+    if renderer is None:
+        renderer = PlaywrightSvgRenderer()
+        renderer.start()
+        _THREAD_RENDERER.renderer = renderer
+    return renderer
+
+
+def _close_thread_renderer() -> None:
+    renderer = getattr(_THREAD_RENDERER, "renderer", None)
+    if renderer is None:
+        return
+
+    try:
+        renderer.close()
+    finally:
+        _THREAD_RENDERER.renderer = None
 
 
 if __name__ == "__main__":
