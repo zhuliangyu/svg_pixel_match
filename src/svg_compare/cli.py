@@ -14,6 +14,8 @@ from svg_compare.render import PlaywrightSvgRenderer, render_svg_to_png
 
 
 _THREAD_RENDERER = threading.local()
+_ERROR_LOG_LOCK = threading.Lock()
+_ERROR_LOG_PATH: Path | None = None
 
 
 def main(
@@ -26,101 +28,106 @@ def main(
     debug_svg_path: Path | None = None,
     debug_output_group: str = "before",
 ) -> None:
+    global _ERROR_LOG_PATH
     outputs_dir = output_dir or Path("outputs")
     _log_info(f"Clearing output directory: {outputs_dir}")
     _clear_output_files(outputs_dir)
+    previous_error_log_path = _ERROR_LOG_PATH
+    _ERROR_LOG_PATH = outputs_dir / "errors.txt"
     different_filenames: list[str] = []
+    try:
+        _log_info("Output directory is ready")
+        _log_info("Start svg pixel matching")
 
-    _log_info("Output directory is ready")
-    _log_info("Start svg pixel matching")
+        if before_dir is not None and after_dir is not None:
+            _log_info(f"Scanning before directory: {before_dir}")
+            _log_info(f"Scanning after directory: {after_dir}")
+            matched_pairs = find_matched_svg_pairs(
+                before_dir,
+                after_dir,
+                report_path=outputs_dir / "unmatched_svgs.txt",
+            )
+            started_at = time.perf_counter()
+            total = len(matched_pairs)
+            _log_info(f"Found {total} matched SVG pairs")
+            if total > 0:
+                worker_count = min(max(1, concurrency), total)
+                _log_info(f"Starting {worker_count} worker threads")
+                pair_queue: Queue[tuple[Path, Path] | None] = Queue()
+                result_queue: Queue[tuple[Path, Path, bool, bytes, bytes]] = Queue()
+                stop_event = threading.Event()
 
-    if before_dir is not None and after_dir is not None:
-        _log_info(f"Scanning before directory: {before_dir}")
-        _log_info(f"Scanning after directory: {after_dir}")
-        matched_pairs = find_matched_svg_pairs(
-            before_dir,
-            after_dir,
-            report_path=outputs_dir / "unmatched_svgs.txt",
-        )
-        started_at = time.perf_counter()
-        total = len(matched_pairs)
-        _log_info(f"Found {total} matched SVG pairs")
-        if total > 0:
-            worker_count = min(max(1, concurrency), total)
-            _log_info(f"Starting {worker_count} worker threads")
-            pair_queue: Queue[tuple[Path, Path] | None] = Queue()
-            result_queue: Queue[tuple[Path, Path, bool, bytes, bytes]] = Queue()
-            stop_event = threading.Event()
+                for matched_pair in matched_pairs:
+                    pair_queue.put(matched_pair)
+                for _ in range(worker_count):
+                    pair_queue.put(None)
 
-            for matched_pair in matched_pairs:
-                pair_queue.put(matched_pair)
-            for _ in range(worker_count):
-                pair_queue.put(None)
-
-            executor = ThreadPoolExecutor(max_workers=worker_count)
-            try:
-                futures = [
-                    executor.submit(
-                        _worker_loop,
-                        pair_queue,
-                        result_queue,
-                        remove_ids or [],
-                        stop_event,
-                    )
-                    for _ in range(worker_count)
-                ]
-
-                completed = 0
-                while completed < total:
-                    result = _wait_for_next_result(result_queue)
-                    if result is None:
-                        _raise_completed_worker_exception(futures)
-                        continue
-
-                    matched_before_path, matched_after_path, is_different, before_png, after_png = result
-                    filename = matched_before_path.name
-                    if is_different:
-                        different_filenames.append(filename)
-                        diff_detail_dir = outputs_dir / "diff_details" / Path(filename).stem
-                        diff_detail_dir.mkdir(parents=True, exist_ok=True)
-                        write_diff_details(
-                            before_png,
-                            after_png,
-                            diff_detail_dir,
+                executor = ThreadPoolExecutor(max_workers=worker_count)
+                try:
+                    futures = [
+                        executor.submit(
+                            _worker_loop,
+                            pair_queue,
+                            result_queue,
+                            remove_ids or [],
+                            stop_event,
                         )
-                        shutil.copyfile(matched_before_path, diff_detail_dir / "before.svg")
-                        shutil.copyfile(matched_after_path, diff_detail_dir / "after.svg")
-                        _print_different_filename(filename)
-                    completed += 1
-                    _print_progress(completed, total, started_at, len(different_filenames))
+                        for _ in range(worker_count)
+                    ]
 
-                for future in futures:
-                    future.result()
-            except KeyboardInterrupt:
-                _log_info("KeyboardInterrupt received, stopping workers")
-                _request_worker_stop(pair_queue, worker_count, stop_event)
-                executor.shutdown(wait=False, cancel_futures=True)
-                raise
-            finally:
-                if not stop_event.is_set():
-                    executor.shutdown(wait=True, cancel_futures=False)
+                    completed = 0
+                    while completed < total:
+                        result = _wait_for_next_result(result_queue)
+                        if result is None:
+                            _raise_completed_worker_exception(futures)
+                            continue
 
-        (outputs_dir / "different.txt").write_text(
-            "".join(f"{filename}\n" for filename in sorted(different_filenames)),
-            encoding="utf-8",
-        )
-        _log_info(f"Wrote different file list: {outputs_dir / 'different.txt'}")
+                        matched_before_path, matched_after_path, is_different, before_png, after_png = result
+                        filename = matched_before_path.name
+                        if is_different:
+                            different_filenames.append(filename)
+                            diff_detail_dir = outputs_dir / "diff_details" / Path(filename).stem
+                            diff_detail_dir.mkdir(parents=True, exist_ok=True)
+                            write_diff_details(
+                                before_png,
+                                after_png,
+                                diff_detail_dir,
+                            )
+                            shutil.copyfile(matched_before_path, diff_detail_dir / "before.svg")
+                            shutil.copyfile(matched_after_path, diff_detail_dir / "after.svg")
+                            _print_different_filename(filename)
+                        completed += 1
+                        _print_progress(completed, total, started_at, len(different_filenames))
 
-    if debug and debug_svg_path is not None:
-        _log_info(f"Rendering debug SVG: {debug_svg_path}")
-        svg_text = debug_svg_path.read_text(encoding="utf-8")
-        debug_output_path = outputs_dir / "debug" / debug_output_group / f"{debug_svg_path.stem}.png"
-        render_svg_to_png(
-            svg_text,
-            debug=True,
-            debug_output_path=debug_output_path,
-        )
-        _log_info(f"Wrote debug PNG: {debug_output_path}")
+                    for future in futures:
+                        future.result()
+                except KeyboardInterrupt:
+                    _log_info("KeyboardInterrupt received, stopping workers")
+                    _request_worker_stop(pair_queue, worker_count, stop_event)
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    raise
+                finally:
+                    if not stop_event.is_set():
+                        executor.shutdown(wait=True, cancel_futures=False)
+
+            (outputs_dir / "different.txt").write_text(
+                "".join(f"{filename}\n" for filename in sorted(different_filenames)),
+                encoding="utf-8",
+            )
+            _log_info(f"Wrote different file list: {outputs_dir / 'different.txt'}")
+
+        if debug and debug_svg_path is not None:
+            _log_info(f"Rendering debug SVG: {debug_svg_path}")
+            svg_text = debug_svg_path.read_text(encoding="utf-8")
+            debug_output_path = outputs_dir / "debug" / debug_output_group / f"{debug_svg_path.stem}.png"
+            render_svg_to_png(
+                svg_text,
+                debug=True,
+                debug_output_path=debug_output_path,
+            )
+            _log_info(f"Wrote debug PNG: {debug_output_path}")
+    finally:
+        _ERROR_LOG_PATH = previous_error_log_path
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -345,6 +352,13 @@ def _log_info(message: str) -> None:
 
 def _log_error(message: str) -> None:
     print(f"[ERROR] {message}", file=sys.stderr, flush=True)
+    if _ERROR_LOG_PATH is None:
+        return
+
+    with _ERROR_LOG_LOCK:
+        _ERROR_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _ERROR_LOG_PATH.open("a", encoding="utf-8") as error_file:
+            error_file.write(f"{message}\n")
 
 
 if __name__ == "__main__":

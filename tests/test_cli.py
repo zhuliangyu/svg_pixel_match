@@ -481,6 +481,8 @@ def test_main_raises_worker_exception_instead_of_waiting_forever(monkeypatch) ->
             remove_ids=["mycurrenttime"],
         )
 
+    assert "Access is denied" in (Path("outputs") / "errors.txt").read_text(encoding="utf-8")
+
 
 def test_worker_loop_logs_failed_filename(monkeypatch) -> None:
     pair_queue = Queue()
