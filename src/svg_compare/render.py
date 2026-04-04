@@ -75,6 +75,7 @@ class PlaywrightSvgRenderer:
         else:
             self._page.set_viewport_size({"width": width, "height": height})
         self._page.set_content(svg_text)
+        self._wait_for_render_stability()
         locator = self._page.locator("svg").first
         locator.wait_for(state="attached")
         png_bytes = locator.screenshot(type="png")
@@ -84,6 +85,18 @@ class PlaywrightSvgRenderer:
             debug_output_path.write_bytes(png_bytes)
 
         return png_bytes
+
+    def _wait_for_render_stability(self) -> None:
+        if self._page is None:
+            return
+
+        self._page.evaluate(
+            "() => document.fonts ? document.fonts.ready.catch(() => undefined) : Promise.resolve()"
+        )
+        self._page.evaluate(
+            "() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
+        )
+        self._page.wait_for_timeout(200)
 
 
 def render_svg_to_png(

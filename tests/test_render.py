@@ -81,12 +81,20 @@ def test_playwright_svg_renderer_reuses_single_page_for_multiple_renders(monkeyp
         def __init__(self) -> None:
             self.viewport_calls: list[dict[str, int]] = []
             self.content_calls: list[str] = []
+            self.evaluate_calls: list[str] = []
+            self.timeout_calls: list[int] = []
 
         def set_viewport_size(self, viewport: dict[str, int]) -> None:
             self.viewport_calls.append(viewport)
 
         def set_content(self, svg_text: str) -> None:
             self.content_calls.append(svg_text)
+
+        def evaluate(self, script: str) -> None:
+            self.evaluate_calls.append(script)
+
+        def wait_for_timeout(self, timeout_ms: int) -> None:
+            self.timeout_calls.append(timeout_ms)
 
         def locator(self, selector: str) -> FakeLocator:
             assert selector == "svg"
@@ -134,6 +142,8 @@ def test_playwright_svg_renderer_reuses_single_page_for_multiple_renders(monkeyp
         {"width": 120, "height": 120},
         {"width": 140, "height": 100},
     ]
+    assert len(created_pages[0].evaluate_calls) == 4
+    assert created_pages[0].timeout_calls == [200, 200]
 
 
 def test_render_svg_to_png_uses_first_svg_locator_when_page_contains_multiple_svgs(monkeypatch) -> None:
@@ -159,12 +169,20 @@ def test_render_svg_to_png_uses_first_svg_locator_when_page_contains_multiple_sv
     class FakePage:
         def __init__(self) -> None:
             self.svg_locator = FakeLocator("first-svg")
+            self.evaluate_calls: list[str] = []
+            self.timeout_calls: list[int] = []
 
         def set_viewport_size(self, viewport: dict[str, int]) -> None:
             return None
 
         def set_content(self, svg_text: str) -> None:
             return None
+
+        def evaluate(self, script: str) -> None:
+            self.evaluate_calls.append(script)
+
+        def wait_for_timeout(self, timeout_ms: int) -> None:
+            self.timeout_calls.append(timeout_ms)
 
         def locator(self, selector: str) -> FakeLocator:
             assert selector == "svg"
@@ -236,6 +254,8 @@ def test_render_svg_to_png_restarts_renderer_and_retries_once_after_driver_disco
     class FakePage:
         def __init__(self, fail_once: bool) -> None:
             self.fail_once = fail_once
+            self.evaluate_calls: list[str] = []
+            self.timeout_calls: list[int] = []
 
         def set_viewport_size(self, viewport: dict[str, int]) -> None:
             return None
@@ -244,6 +264,12 @@ def test_render_svg_to_png_restarts_renderer_and_retries_once_after_driver_disco
             if self.fail_once:
                 self.fail_once = False
                 raise Exception("Connection closed while reading from the driver")
+
+        def evaluate(self, script: str) -> None:
+            self.evaluate_calls.append(script)
+
+        def wait_for_timeout(self, timeout_ms: int) -> None:
+            self.timeout_calls.append(timeout_ms)
 
         def locator(self, selector: str) -> FakeLocator:
             assert selector == "svg"
