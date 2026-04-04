@@ -85,11 +85,17 @@ python -m svg_compare.cli `
 
 `--output-dir` 默认值是 `outputs`，`--concurrency` 默认值是 `4`。
 
-运行后会先清空 `outputs/`，然后生成：
+运行后会先清空 `--output-dir` 指定目录，然后生成：
 
 - `outputs/different.txt`
 - `outputs/unmatched_svgs.txt`
 - `outputs/diff_details/<filename-stem>/`
+
+运行过程中可以按 `Ctrl+C` 请求停止：
+
+- 未开始的任务会被取消
+- 正在渲染中的少量任务可能要等当前这次渲染返回后才会退出
+- 已经写出的结果文件会保留在当前 `--output-dir` 下
 
 ## Debug 渲染
 
