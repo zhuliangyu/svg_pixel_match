@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+from urllib.parse import quote
 
 from playwright.sync_api import sync_playwright
 
@@ -10,12 +11,12 @@ def render_svg_to_png(
     debug_output_path: Path | None = None,
 ) -> bytes:
     width, height = _extract_dimensions(svg_text)
-    page_content = _build_html(svg_text, width, height)
+    svg_data_url = f"data:image/svg+xml;charset=utf-8,{quote(svg_text)}"
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         page = browser.new_page(viewport={"width": width, "height": height}, device_scale_factor=1)
-        page.set_content(page_content)
+        page.goto(svg_data_url)
         png_bytes = page.locator("svg").screenshot(type="png")
         browser.close()
 
@@ -34,16 +35,3 @@ def _extract_dimensions(svg_text: str) -> tuple[int, int]:
         raise ValueError("SVG width and height are required")
 
     return int(width_match.group(1)), int(height_match.group(1))
-
-
-def _build_html(svg_text: str, width: int, height: int) -> str:
-    return (
-        "<!doctype html>"
-        "<html>"
-        "<body style='margin:0; background:white;'>"
-        f"<div style='width:{width}px; height:{height}px;'>"
-        f"{svg_text}"
-        "</div>"
-        "</body>"
-        "</html>"
-    )

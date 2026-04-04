@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from svg_compare.cli import main, parse_args, run_cli
 
 
@@ -85,6 +87,8 @@ def test_main_pairs_svg_files_and_preprocesses_before_and_after(monkeypatch) -> 
         return svg_text
 
     monkeypatch.setattr("svg_compare.cli.preprocess_svg", fake_preprocess_svg)
+    monkeypatch.setattr("svg_compare.cli.render_svg_to_png", lambda svg_text, debug=False, debug_output_path=None: b"png")
+    monkeypatch.setattr("svg_compare.cli.compare_png_bytes", lambda before_png, after_png: True)
 
     main(
         before_dir=Path("tests/fixtures/before"),
@@ -97,6 +101,69 @@ def test_main_pairs_svg_files_and_preprocesses_before_and_after(monkeypatch) -> 
     assert preprocess_calls[1][1] == ["mycurrenttime", "dot-before-a"]
     assert "2026-04-03T23:45:10.101" in preprocess_calls[0][0]
     assert "2026-04-03T23:45:10.202" in preprocess_calls[1][0]
+
+
+def test_main_renders_preprocessed_svgs_and_compares_pngs(monkeypatch) -> None:
+    before_path = Path("tests/fixtures/before/sample_same_1.svg")
+    after_path = Path("tests/fixtures/after/sample_same_1.svg")
+    render_calls: list[str] = []
+    compare_calls: list[tuple[bytes, bytes]] = []
+
+    monkeypatch.setattr(
+        "svg_compare.cli.find_matched_svg_pairs",
+        lambda before_dir, after_dir, report_path=None: [(before_path, after_path)],
+    )
+    monkeypatch.setattr(
+        "svg_compare.cli.preprocess_svg",
+        lambda svg_text, remove_ids: f"processed::{svg_text}",
+    )
+
+    def fake_render_svg_to_png(
+        svg_text: str,
+        debug: bool = False,
+        debug_output_path: Path | None = None,
+    ) -> bytes:
+        render_calls.append(svg_text)
+        return f"png::{len(render_calls)}".encode()
+
+    def fake_compare_png_bytes(before_png: bytes, after_png: bytes) -> bool:
+        compare_calls.append((before_png, after_png))
+        return True
+
+    monkeypatch.setattr("svg_compare.cli.render_svg_to_png", fake_render_svg_to_png)
+    monkeypatch.setattr("svg_compare.cli.compare_png_bytes", fake_compare_png_bytes)
+
+    main(
+        before_dir=Path("tests/fixtures/before"),
+        after_dir=Path("tests/fixtures/after"),
+        remove_ids=["mycurrenttime"],
+    )
+
+    assert len(render_calls) == 2
+    assert render_calls[0].startswith("processed::")
+    assert render_calls[1].startswith("processed::")
+    assert compare_calls == [(b"png::1", b"png::2")]
+
+
+def test_main_writes_different_filename_when_compare_returns_false(monkeypatch) -> None:
+    before_path = Path("tests/fixtures/before/sample_diff_1.svg")
+    after_path = Path("tests/fixtures/after/sample_diff_1.svg")
+
+    monkeypatch.setattr(
+        "svg_compare.cli.find_matched_svg_pairs",
+        lambda before_dir, after_dir, report_path=None: [(before_path, after_path)],
+    )
+    monkeypatch.setattr("svg_compare.cli.preprocess_svg", lambda svg_text, remove_ids: svg_text)
+    monkeypatch.setattr("svg_compare.cli.render_svg_to_png", lambda svg_text, debug=False, debug_output_path=None: b"png")
+    monkeypatch.setattr("svg_compare.cli.compare_png_bytes", lambda before_png, after_png: False)
+
+    main(
+        before_dir=Path("tests/fixtures/before"),
+        after_dir=Path("tests/fixtures/after"),
+        remove_ids=["mycurrenttime"],
+    )
+
+    assert (Path("outputs") / "different.txt").read_text(encoding="utf-8") == "sample_diff_1.svg\n"
 
 
 def test_parse_args_accepts_before_after_paths_and_multiple_remove_ids() -> None:
@@ -162,3 +229,20 @@ def test_run_cli_passes_parsed_values_to_main(monkeypatch) -> None:
     assert captured["debug"] is True
     assert captured["debug_svg_path"] == Path("tests/fixtures/before/sample_same_1.svg")
     assert captured["debug_output_group"] == "after"
+
+
+@pytest.mark.integration
+def test_main_end_to_end_writes_expected_different_txt() -> None:
+    main(
+        before_dir=Path("tests/fixtures/before"),
+        after_dir=Path("tests/fixtures/after"),
+        remove_ids=["mycurrenttime"],
+    )
+
+    assert (Path("outputs") / "different.txt").read_text(encoding="utf-8") == (
+        "sample_diff_1.svg\n"
+        "sample_diff_2.svg\n"
+    )
+    assert (Path("outputs") / "unmatched_svgs.txt").read_text(encoding="utf-8") == (
+        "after_only_unmatched.svg\n"
+    )

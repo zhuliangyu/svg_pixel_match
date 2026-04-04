@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 import shutil
 
+from svg_compare.compare import compare_png_bytes
 from svg_compare.pairing import find_matched_svg_pairs
 from svg_compare.preprocess import preprocess_svg
 from svg_compare.render import render_svg_to_png
@@ -17,6 +18,7 @@ def main(
 ) -> None:
     outputs_dir = Path("outputs")
     _clear_output_files(outputs_dir)
+    different_filenames: list[str] = []
 
     if before_dir is not None and after_dir is not None:
         matched_pairs = find_matched_svg_pairs(
@@ -28,8 +30,18 @@ def main(
         for matched_before_path, matched_after_path in matched_pairs:
             matched_before_svg = matched_before_path.read_text(encoding="utf-8")
             matched_after_svg = matched_after_path.read_text(encoding="utf-8")
-            preprocess_svg(matched_before_svg, remove_ids or [])
-            preprocess_svg(matched_after_svg, remove_ids or [])
+            processed_before_svg = preprocess_svg(matched_before_svg, remove_ids or [])
+            processed_after_svg = preprocess_svg(matched_after_svg, remove_ids or [])
+            before_png = render_svg_to_png(processed_before_svg)
+            after_png = render_svg_to_png(processed_after_svg)
+
+            if not compare_png_bytes(before_png, after_png):
+                different_filenames.append(matched_before_path.name)
+
+        (outputs_dir / "different.txt").write_text(
+            "".join(f"{filename}\n" for filename in different_filenames),
+            encoding="utf-8",
+        )
 
     if debug and debug_svg_path is not None:
         svg_text = debug_svg_path.read_text(encoding="utf-8")
