@@ -1,5 +1,6 @@
 import json
 import re
+import tempfile
 from pathlib import Path
 
 from playwright.sync_api import Page, Playwright, Browser, sync_playwright
@@ -75,7 +76,7 @@ class PlaywrightSvgRenderer:
             )
         else:
             self._page.set_viewport_size({"width": width, "height": height})
-        self._page.set_content(svg_text, timeout=120000)
+        self._load_svg_file(svg_text)
         self._wait_for_render_stability()
         locator = self._page.locator("svg").first
         locator.wait_for(state="attached")
@@ -99,7 +100,7 @@ class PlaywrightSvgRenderer:
             )
         else:
             self._page.set_viewport_size({"width": width, "height": height})
-        self._page.set_content(svg_text, timeout=120000)
+        self._load_svg_file(svg_text)
         self._wait_for_render_stability()
 
         svg_locator = self._page.locator("svg")
@@ -139,6 +140,16 @@ class PlaywrightSvgRenderer:
             "() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
         )
         self._page.wait_for_timeout(200)
+
+    def _load_svg_file(self, svg_text: str) -> None:
+        if self._page is None:
+            raise RuntimeError("Page is not ready")
+
+        temp_svg_path = _write_temp_svg_file(svg_text)
+        try:
+            self._page.goto(temp_svg_path.as_uri(), wait_until="load", timeout=120000)
+        finally:
+            temp_svg_path.unlink(missing_ok=True)
 
     def _capture_page_debug_png(self) -> bytes:
         if self._page is None:
@@ -264,3 +275,14 @@ def _is_driver_connection_closed_error(exc: Exception) -> bool:
 
 def _to_count(locator) -> int:
     return int(locator.count())
+
+
+def _write_temp_svg_file(svg_text: str) -> Path:
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        suffix=".svg",
+        delete=False,
+    ) as temp_file:
+        temp_file.write(svg_text)
+        return Path(temp_file.name)

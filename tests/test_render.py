@@ -80,18 +80,15 @@ def test_playwright_svg_renderer_reuses_single_page_for_multiple_renders(monkeyp
     class FakePage:
         def __init__(self) -> None:
             self.viewport_calls: list[dict[str, int]] = []
-            self.content_calls: list[str] = []
-            self.content_timeouts: list[int] = []
+            self.goto_calls: list[tuple[str, str, int | None]] = []
             self.evaluate_calls: list[str] = []
             self.timeout_calls: list[int] = []
 
         def set_viewport_size(self, viewport: dict[str, int]) -> None:
             self.viewport_calls.append(viewport)
 
-        def set_content(self, svg_text: str, timeout: int | None = None) -> None:
-            self.content_calls.append(svg_text)
-            if timeout is not None:
-                self.content_timeouts.append(timeout)
+        def goto(self, url: str, wait_until: str = "load", timeout: int | None = None) -> None:
+            self.goto_calls.append((url, wait_until, timeout))
 
         def evaluate(self, script: str) -> None:
             self.evaluate_calls.append(script)
@@ -145,7 +142,12 @@ def test_playwright_svg_renderer_reuses_single_page_for_multiple_renders(monkeyp
         {"width": 120, "height": 120},
         {"width": 140, "height": 100},
     ]
-    assert created_pages[0].content_timeouts == [120000, 120000]
+    assert len(created_pages[0].goto_calls) == 2
+    assert all(call[0].startswith("file:///") for call in created_pages[0].goto_calls)
+    assert created_pages[0].goto_calls == [
+        (created_pages[0].goto_calls[0][0], "load", 120000),
+        (created_pages[0].goto_calls[1][0], "load", 120000),
+    ]
     assert len(created_pages[0].evaluate_calls) == 4
     assert created_pages[0].timeout_calls == [200, 200]
 
@@ -173,16 +175,15 @@ def test_render_svg_to_png_uses_first_svg_locator_when_page_contains_multiple_sv
     class FakePage:
         def __init__(self) -> None:
             self.svg_locator = FakeLocator("first-svg")
-            self.content_timeouts: list[int] = []
+            self.goto_calls: list[tuple[str, str, int | None]] = []
             self.evaluate_calls: list[str] = []
             self.timeout_calls: list[int] = []
 
         def set_viewport_size(self, viewport: dict[str, int]) -> None:
             return None
 
-        def set_content(self, svg_text: str, timeout: int | None = None) -> None:
-            if timeout is not None:
-                self.content_timeouts.append(timeout)
+        def goto(self, url: str, wait_until: str = "load", timeout: int | None = None) -> None:
+            self.goto_calls.append((url, wait_until, timeout))
 
         def evaluate(self, script: str) -> None:
             self.evaluate_calls.append(script)
@@ -238,7 +239,9 @@ def test_render_svg_to_png_uses_first_svg_locator_when_page_contains_multiple_sv
     renderer.close()
 
     assert png_bytes.startswith(b"\x89PNG")
-    assert fake_manager.playwright.chromium.browser.page.content_timeouts == [120000]
+    assert len(fake_manager.playwright.chromium.browser.page.goto_calls) == 1
+    assert fake_manager.playwright.chromium.browser.page.goto_calls[0][0].startswith("file:///")
+    assert fake_manager.playwright.chromium.browser.page.goto_calls[0][1:] == ("load", 120000)
     assert fake_manager.playwright.chromium.browser.page.svg_locator.wait_called is True
     assert fake_manager.playwright.chromium.browser.page.svg_locator.screenshot_called is True
 
@@ -261,16 +264,15 @@ def test_render_svg_to_png_restarts_renderer_and_retries_once_after_driver_disco
     class FakePage:
         def __init__(self, fail_once: bool) -> None:
             self.fail_once = fail_once
-            self.content_timeouts: list[int] = []
+            self.goto_calls: list[tuple[str, str, int | None]] = []
             self.evaluate_calls: list[str] = []
             self.timeout_calls: list[int] = []
 
         def set_viewport_size(self, viewport: dict[str, int]) -> None:
             return None
 
-        def set_content(self, svg_text: str, timeout: int | None = None) -> None:
-            if timeout is not None:
-                self.content_timeouts.append(timeout)
+        def goto(self, url: str, wait_until: str = "load", timeout: int | None = None) -> None:
+            self.goto_calls.append((url, wait_until, timeout))
             if self.fail_once:
                 self.fail_once = False
                 raise Exception("Connection closed while reading from the driver")
@@ -378,14 +380,14 @@ def test_write_render_debug_details_writes_page_screenshots_and_metadata(monkeyp
 
     class FakePage:
         def __init__(self) -> None:
-            self.content_calls: list[str] = []
+            self.goto_calls: list[tuple[str, str, int | None]] = []
             self.screenshot_calls: list[dict[str, object]] = []
 
         def set_viewport_size(self, viewport: dict[str, int]) -> None:
             return None
 
-        def set_content(self, svg_text: str, timeout: int | None = None) -> None:
-            self.content_calls.append(svg_text)
+        def goto(self, url: str, wait_until: str = "load", timeout: int | None = None) -> None:
+            self.goto_calls.append((url, wait_until, timeout))
 
         def evaluate(self, script: str):
             if "document.querySelectorAll('svg')" in script:
