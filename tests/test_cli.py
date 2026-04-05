@@ -221,6 +221,7 @@ def test_main_writes_different_filename_when_compare_returns_false(monkeypatch) 
     after_path = Path("tests/fixtures/after/sample_diff_1.svg")
     printed_diffs: list[str] = []
     diff_detail_calls: list[tuple[bytes, bytes, Path]] = []
+    render_debug_calls: list[tuple[str, str, Path]] = []
     diff_detail_dir = Path("outputs") / "diff_details" / "sample_diff_1"
     if diff_detail_dir.exists():
         for path in diff_detail_dir.iterdir():
@@ -244,6 +245,12 @@ def test_main_writes_different_filename_when_compare_returns_false(monkeypatch) 
             (before_png, after_png, output_dir)
         ),
     )
+    monkeypatch.setattr(
+        "svg_compare.cli.write_render_debug_details",
+        lambda before_svg, after_svg, output_dir: render_debug_calls.append(
+            (before_svg, after_svg, output_dir)
+        ),
+    )
     monkeypatch.setattr("svg_compare.cli._print_different_filename", lambda filename: printed_diffs.append(filename))
 
     main(
@@ -257,6 +264,13 @@ def test_main_writes_different_filename_when_compare_returns_false(monkeypatch) 
         (
             b"png",
             b"png",
+            Path("outputs") / "diff_details" / "sample_diff_1",
+        )
+    ]
+    assert render_debug_calls == [
+        (
+            before_path.read_text(encoding="utf-8"),
+            after_path.read_text(encoding="utf-8"),
             Path("outputs") / "diff_details" / "sample_diff_1",
         )
     ]

@@ -5,7 +5,7 @@ import pytest
 
 pytest.importorskip("playwright.sync_api")
 
-from svg_compare.render import PlaywrightSvgRenderer, render_svg_to_png
+from svg_compare.render import PlaywrightSvgRenderer, render_svg_to_png, write_render_debug_details
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -333,6 +333,125 @@ def test_render_svg_to_png_restarts_renderer_and_retries_once_after_driver_disco
     assert png_bytes.startswith(b"\x89PNG")
     assert fake_manager.playwright.chromium.launch_count == 2
     assert len(created_pages) == 2
+
+
+def test_write_render_debug_details_writes_page_screenshots_and_metadata(monkeypatch) -> None:
+    output_dir = Path("outputs") / "test_render_debug_details"
+    if output_dir.exists():
+        for path in output_dir.iterdir():
+            path.unlink()
+        output_dir.rmdir()
+
+    class FakeSvgLocator:
+        @property
+        def first(self) -> "FakeSvgLocator":
+            return self
+
+        def wait_for(self, state: str) -> None:
+            assert state == "attached"
+
+        def screenshot(self, type: str) -> bytes:
+            assert type == "png"
+            return b"\x89PNG\r\n\x1a\nsvg"
+
+        def bounding_box(self) -> dict[str, float]:
+            return {"x": 1.0, "y": 2.0, "width": 120.0, "height": 80.0}
+
+        def get_attribute(self, name: str) -> str | None:
+            attributes = {
+                "width": "120",
+                "height": "80",
+                "viewBox": "0 0 120 80",
+            }
+            return attributes.get(name)
+
+        def count(self) -> int:
+            return 2
+
+    class FakeCountLocator:
+        def __init__(self, count: int) -> None:
+            self._count = count
+
+        def count(self) -> int:
+            return self._count
+
+    class FakePage:
+        def __init__(self) -> None:
+            self.content_calls: list[str] = []
+
+        def set_viewport_size(self, viewport: dict[str, int]) -> None:
+            return None
+
+        def set_content(self, svg_text: str, timeout: int | None = None) -> None:
+            self.content_calls.append(svg_text)
+
+        def evaluate(self, script: str) -> None:
+            return None
+
+        def wait_for_timeout(self, timeout_ms: int) -> None:
+            return None
+
+        def locator(self, selector: str):
+            if selector == "svg":
+                return FakeSvgLocator()
+            counts = {
+                "image": 1,
+                "foreignObject": 0,
+                "use": 3,
+                "clipPath": 1,
+                "mask": 0,
+                "filter": 2,
+            }
+            return FakeCountLocator(counts[selector])
+
+        def screenshot(self, type: str) -> bytes:
+            assert type == "png"
+            return b"\x89PNG\r\n\x1a\npage"
+
+        @property
+        def url(self) -> str:
+            return "about:blank"
+
+    class FakeBrowser:
+        def new_page(self, viewport: dict[str, int], device_scale_factor: int) -> FakePage:
+            return FakePage()
+
+        def close(self) -> None:
+            return None
+
+    class FakeChromium:
+        def launch(self) -> FakeBrowser:
+            return FakeBrowser()
+
+    class FakePlaywright:
+        chromium = FakeChromium()
+
+    class FakeManager:
+        def __enter__(self) -> FakePlaywright:
+            return FakePlaywright()
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    monkeypatch.setattr("svg_compare.render.sync_playwright", lambda: FakeManager())
+
+    write_render_debug_details(
+        '<svg width="120" height="80"></svg>',
+        '<svg width="120" height="80"></svg>',
+        output_dir,
+    )
+
+    assert (output_dir / "page_before.png").read_bytes().startswith(b"\x89PNG")
+    assert (output_dir / "page_after.png").read_bytes().startswith(b"\x89PNG")
+    debug_json = (output_dir / "render_debug.json").read_text(encoding="utf-8")
+    assert '"svg_count": 2' in debug_json
+    assert '"image_count": 1' in debug_json
+    assert '"viewBox": "0 0 120 80"' in debug_json
+    assert '"page_url": "about:blank"' in debug_json
+
+    for path in output_dir.iterdir():
+        path.unlink()
+    output_dir.rmdir()
 
 
 def _read_png_size(png_bytes: bytes) -> tuple[int, int]:
