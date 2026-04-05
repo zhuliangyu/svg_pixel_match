@@ -10,7 +10,7 @@ import time
 from svg_compare.compare import compare_png_bytes, write_diff_details
 from svg_compare.pairing import find_matched_svg_pairs
 from svg_compare.preprocess import preprocess_svg
-from svg_compare.render import PlaywrightSvgRenderer, render_svg_to_png, write_render_debug_details
+from svg_compare.render import PlaywrightSvgRenderer, render_svg_to_png
 
 
 _THREAD_RENDERER = threading.local()
@@ -57,7 +57,7 @@ def main(
                 worker_count = min(max(1, concurrency), total)
                 _log_info(f"Starting {worker_count} worker threads")
                 pair_queue: Queue[tuple[Path, Path] | None] = Queue()
-                result_queue: Queue[tuple[Path, Path, bool, bytes, bytes, str, str]] = Queue()
+                result_queue: Queue[tuple[Path, Path, bool, bytes, bytes]] = Queue()
                 stop_event = threading.Event()
 
                 for matched_pair in matched_pairs:
@@ -91,8 +91,6 @@ def main(
                             is_different,
                             before_png,
                             after_png,
-                            processed_before_svg,
-                            processed_after_svg,
                         ) = result
                         filename = matched_before_path.name
                         if is_different:
@@ -102,11 +100,6 @@ def main(
                             write_diff_details(
                                 before_png,
                                 after_png,
-                                diff_detail_dir,
-                            )
-                            write_render_debug_details(
-                                processed_before_svg,
-                                processed_after_svg,
                                 diff_detail_dir,
                             )
                             shutil.copyfile(matched_before_path, diff_detail_dir / "before.svg")
@@ -243,7 +236,7 @@ def _format_seconds(seconds: float) -> str:
 
 def _worker_loop(
     pair_queue: Queue[tuple[Path, Path] | None],
-    result_queue: Queue[tuple[Path, Path, bool, bytes, bytes, str, str]],
+    result_queue: Queue[tuple[Path, Path, bool, bytes, bytes]],
     remove_ids: list[str],
     stop_event: threading.Event,
 ) -> None:
@@ -266,7 +259,7 @@ def _worker_loop(
             current_after_path = matched_after_path
             current_filename = matched_before_path.name
             _log_info(f"[{threading.current_thread().name}] Processing pair: {matched_before_path.name}")
-            is_different, before_png, after_png, processed_before_svg, processed_after_svg = _process_pair(
+            is_different, before_png, after_png = _process_pair(
                 matched_before_path,
                 matched_after_path,
                 remove_ids,
@@ -279,8 +272,6 @@ def _worker_loop(
                     is_different,
                     before_png,
                     after_png,
-                    processed_before_svg,
-                    processed_after_svg,
                 )
             )
             _log_info(f"[{threading.current_thread().name}] Finished pair: {matched_before_path.name}")
@@ -306,7 +297,7 @@ def _process_pair(
     matched_after_path: Path,
     remove_ids: list[str],
     renderer: PlaywrightSvgRenderer | None = None,
-) -> tuple[bool, bytes, bytes, str, str]:
+) -> tuple[bool, bytes, bytes]:
     if renderer is None:
         renderer = _get_thread_renderer()
     matched_before_svg = matched_before_path.read_text(encoding="utf-8")
@@ -319,8 +310,6 @@ def _process_pair(
         not compare_png_bytes(before_png, after_png),
         before_png,
         after_png,
-        processed_before_svg,
-        processed_after_svg,
     )
 
 
@@ -348,9 +337,9 @@ def _close_thread_renderer() -> None:
 
 
 def _wait_for_next_result(
-    result_queue: Queue[tuple[Path, Path, bool, bytes, bytes, str, str]],
+    result_queue: Queue[tuple[Path, Path, bool, bytes, bytes]],
     timeout_seconds: float = 0.2,
-) -> tuple[Path, Path, bool, bytes, bytes, str, str] | None:
+) -> tuple[Path, Path, bool, bytes, bytes] | None:
     try:
         return result_queue.get(timeout=timeout_seconds)
     except Empty:

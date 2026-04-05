@@ -1,4 +1,3 @@
-import json
 import re
 import tempfile
 from pathlib import Path
@@ -88,47 +87,6 @@ class PlaywrightSvgRenderer:
 
         return png_bytes
 
-    def capture_render_debug_artifacts(self, svg_text: str) -> dict[str, object]:
-        if self._browser is None:
-            self.start()
-
-        width, height = _extract_dimensions(svg_text)
-        if self._page is None:
-            self._page = self._browser.new_page(
-                viewport={"width": width, "height": height},
-                device_scale_factor=1,
-            )
-        else:
-            self._page.set_viewport_size({"width": width, "height": height})
-        self._load_svg_file(svg_text)
-        self._wait_for_render_stability()
-
-        svg_locator = self._page.locator("svg")
-        first_svg_locator = svg_locator.first
-        first_svg_locator.wait_for(state="attached")
-
-        return {
-            "page_png": self._capture_page_debug_png(),
-            "metadata": {
-                "page_url": self._page.url,
-                "page_metrics": self._read_page_metrics(),
-                "svg_count": _to_count(svg_locator),
-                "image_count": _to_count(self._page.locator("image")),
-                "foreign_object_count": _to_count(self._page.locator("foreignObject")),
-                "use_count": _to_count(self._page.locator("use")),
-                "clip_path_count": _to_count(self._page.locator("clipPath")),
-                "mask_count": _to_count(self._page.locator("mask")),
-                "filter_count": _to_count(self._page.locator("filter")),
-                "svg_union_bounding_box": self._read_svg_union_bounding_box(),
-                "first_svg": {
-                    "width": first_svg_locator.get_attribute("width"),
-                    "height": first_svg_locator.get_attribute("height"),
-                    "viewBox": first_svg_locator.get_attribute("viewBox"),
-                    "bounding_box": first_svg_locator.bounding_box(),
-                },
-            },
-        }
-
     def _wait_for_render_stability(self) -> None:
         if self._page is None:
             return
@@ -151,67 +109,6 @@ class PlaywrightSvgRenderer:
         finally:
             temp_svg_path.unlink(missing_ok=True)
 
-    def _capture_page_debug_png(self) -> bytes:
-        if self._page is None:
-            raise RuntimeError("Page is not ready")
-
-        svg_union_box = self._read_svg_union_bounding_box()
-        if svg_union_box is None:
-            return self._page.screenshot(type="png", full_page=True)
-
-        return self._page.screenshot(type="png", clip=svg_union_box)
-
-    def _read_page_metrics(self) -> dict[str, int] | None:
-        if self._page is None:
-            return None
-
-        return self._page.evaluate(
-            """() => ({
-                scrollWidth: Math.max(
-                    document.documentElement ? document.documentElement.scrollWidth : 0,
-                    document.body ? document.body.scrollWidth : 0
-                ),
-                scrollHeight: Math.max(
-                    document.documentElement ? document.documentElement.scrollHeight : 0,
-                    document.body ? document.body.scrollHeight : 0
-                )
-            })"""
-        )
-
-    def _read_svg_union_bounding_box(self) -> dict[str, float] | None:
-        if self._page is None:
-            return None
-
-        bounding_box = self._page.evaluate(
-            """() => {
-                const svgs = Array.from(document.querySelectorAll('svg'));
-                if (svgs.length === 0) {
-                    return null;
-                }
-
-                let left = Number.POSITIVE_INFINITY;
-                let top = Number.POSITIVE_INFINITY;
-                let right = Number.NEGATIVE_INFINITY;
-                let bottom = Number.NEGATIVE_INFINITY;
-
-                for (const svg of svgs) {
-                    const rect = svg.getBoundingClientRect();
-                    left = Math.min(left, rect.left);
-                    top = Math.min(top, rect.top);
-                    right = Math.max(right, rect.right);
-                    bottom = Math.max(bottom, rect.bottom);
-                }
-
-                return {
-                    x: Math.max(0, left),
-                    y: Math.max(0, top),
-                    width: Math.max(1, right - left),
-                    height: Math.max(1, bottom - top),
-                };
-            }"""
-        )
-        return bounding_box
-
 
 def render_svg_to_png(
     svg_text: str,
@@ -230,34 +127,6 @@ def render_svg_to_png(
         renderer.close()
 
 
-def write_render_debug_details(
-    before_svg_text: str,
-    after_svg_text: str,
-    output_dir: Path,
-) -> None:
-    renderer = PlaywrightSvgRenderer()
-    try:
-        renderer.start()
-        before_artifacts = renderer.capture_render_debug_artifacts(before_svg_text)
-        after_artifacts = renderer.capture_render_debug_artifacts(after_svg_text)
-    finally:
-        renderer.close()
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "page_before.png").write_bytes(before_artifacts["page_png"])
-    (output_dir / "page_after.png").write_bytes(after_artifacts["page_png"])
-    (output_dir / "render_debug.json").write_text(
-        json.dumps(
-            {
-                "before": before_artifacts["metadata"],
-                "after": after_artifacts["metadata"],
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-
-
 def _extract_dimensions(svg_text: str) -> tuple[int, int]:
     width_match = re.search(r'\bwidth="(\d+)"', svg_text)
     height_match = re.search(r'\bheight="(\d+)"', svg_text)
@@ -271,10 +140,6 @@ def _extract_dimensions(svg_text: str) -> tuple[int, int]:
 def _is_driver_connection_closed_error(exc: Exception) -> bool:
     message = str(exc).lower()
     return "connection closed" in message and "driver" in message
-
-
-def _to_count(locator) -> int:
-    return int(locator.count())
 
 
 def _write_temp_svg_file(svg_text: str) -> Path:
