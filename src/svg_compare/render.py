@@ -107,9 +107,10 @@ class PlaywrightSvgRenderer:
         first_svg_locator.wait_for(state="attached")
 
         return {
-            "page_png": self._page.screenshot(type="png"),
+            "page_png": self._capture_page_debug_png(),
             "metadata": {
                 "page_url": self._page.url,
+                "page_metrics": self._read_page_metrics(),
                 "svg_count": _to_count(svg_locator),
                 "image_count": _to_count(self._page.locator("image")),
                 "foreign_object_count": _to_count(self._page.locator("foreignObject")),
@@ -117,6 +118,7 @@ class PlaywrightSvgRenderer:
                 "clip_path_count": _to_count(self._page.locator("clipPath")),
                 "mask_count": _to_count(self._page.locator("mask")),
                 "filter_count": _to_count(self._page.locator("filter")),
+                "svg_union_bounding_box": self._read_svg_union_bounding_box(),
                 "first_svg": {
                     "width": first_svg_locator.get_attribute("width"),
                     "height": first_svg_locator.get_attribute("height"),
@@ -137,6 +139,67 @@ class PlaywrightSvgRenderer:
             "() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
         )
         self._page.wait_for_timeout(200)
+
+    def _capture_page_debug_png(self) -> bytes:
+        if self._page is None:
+            raise RuntimeError("Page is not ready")
+
+        svg_union_box = self._read_svg_union_bounding_box()
+        if svg_union_box is None:
+            return self._page.screenshot(type="png", full_page=True)
+
+        return self._page.screenshot(type="png", clip=svg_union_box)
+
+    def _read_page_metrics(self) -> dict[str, int] | None:
+        if self._page is None:
+            return None
+
+        return self._page.evaluate(
+            """() => ({
+                scrollWidth: Math.max(
+                    document.documentElement ? document.documentElement.scrollWidth : 0,
+                    document.body ? document.body.scrollWidth : 0
+                ),
+                scrollHeight: Math.max(
+                    document.documentElement ? document.documentElement.scrollHeight : 0,
+                    document.body ? document.body.scrollHeight : 0
+                )
+            })"""
+        )
+
+    def _read_svg_union_bounding_box(self) -> dict[str, float] | None:
+        if self._page is None:
+            return None
+
+        bounding_box = self._page.evaluate(
+            """() => {
+                const svgs = Array.from(document.querySelectorAll('svg'));
+                if (svgs.length === 0) {
+                    return null;
+                }
+
+                let left = Number.POSITIVE_INFINITY;
+                let top = Number.POSITIVE_INFINITY;
+                let right = Number.NEGATIVE_INFINITY;
+                let bottom = Number.NEGATIVE_INFINITY;
+
+                for (const svg of svgs) {
+                    const rect = svg.getBoundingClientRect();
+                    left = Math.min(left, rect.left);
+                    top = Math.min(top, rect.top);
+                    right = Math.max(right, rect.right);
+                    bottom = Math.max(bottom, rect.bottom);
+                }
+
+                return {
+                    x: Math.max(0, left),
+                    y: Math.max(0, top),
+                    width: Math.max(1, right - left),
+                    height: Math.max(1, bottom - top),
+                };
+            }"""
+        )
+        return bounding_box
 
 
 def render_svg_to_png(

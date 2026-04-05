@@ -341,6 +341,7 @@ def test_write_render_debug_details_writes_page_screenshots_and_metadata(monkeyp
         for path in output_dir.iterdir():
             path.unlink()
         output_dir.rmdir()
+    created_pages: list[FakePage] = []
 
     class FakeSvgLocator:
         @property
@@ -378,6 +379,7 @@ def test_write_render_debug_details_writes_page_screenshots_and_metadata(monkeyp
     class FakePage:
         def __init__(self) -> None:
             self.content_calls: list[str] = []
+            self.screenshot_calls: list[dict[str, object]] = []
 
         def set_viewport_size(self, viewport: dict[str, int]) -> None:
             return None
@@ -385,7 +387,11 @@ def test_write_render_debug_details_writes_page_screenshots_and_metadata(monkeyp
         def set_content(self, svg_text: str, timeout: int | None = None) -> None:
             self.content_calls.append(svg_text)
 
-        def evaluate(self, script: str) -> None:
+        def evaluate(self, script: str):
+            if "document.querySelectorAll('svg')" in script:
+                return {"x": 4.0, "y": 5.0, "width": 300.0, "height": 200.0}
+            if "document.documentElement.scrollWidth" in script:
+                return {"scrollWidth": 320, "scrollHeight": 240}
             return None
 
         def wait_for_timeout(self, timeout_ms: int) -> None:
@@ -404,8 +410,9 @@ def test_write_render_debug_details_writes_page_screenshots_and_metadata(monkeyp
             }
             return FakeCountLocator(counts[selector])
 
-        def screenshot(self, type: str) -> bytes:
+        def screenshot(self, type: str, clip: dict[str, float] | None = None, full_page: bool = False) -> bytes:
             assert type == "png"
+            self.screenshot_calls.append({"clip": clip, "full_page": full_page})
             return b"\x89PNG\r\n\x1a\npage"
 
         @property
@@ -414,7 +421,9 @@ def test_write_render_debug_details_writes_page_screenshots_and_metadata(monkeyp
 
     class FakeBrowser:
         def new_page(self, viewport: dict[str, int], device_scale_factor: int) -> FakePage:
-            return FakePage()
+            page = FakePage()
+            created_pages.append(page)
+            return page
 
         def close(self) -> None:
             return None
@@ -448,6 +457,12 @@ def test_write_render_debug_details_writes_page_screenshots_and_metadata(monkeyp
     assert '"image_count": 1' in debug_json
     assert '"viewBox": "0 0 120 80"' in debug_json
     assert '"page_url": "about:blank"' in debug_json
+    assert '"scrollWidth": 320' in debug_json
+    assert '"scrollHeight": 240' in debug_json
+    assert created_pages[0].screenshot_calls == [
+        {"clip": {"x": 4.0, "y": 5.0, "width": 300.0, "height": 200.0}, "full_page": False},
+        {"clip": {"x": 4.0, "y": 5.0, "width": 300.0, "height": 200.0}, "full_page": False},
+    ]
 
     for path in output_dir.iterdir():
         path.unlink()
